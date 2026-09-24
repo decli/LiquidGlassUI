@@ -1,0 +1,857 @@
+/*!
+ * Liquid Glass UI —— 样式 v1.0.0
+ *
+ * 一套照 Apple Liquid Glass 做的网页材质与组件：控制层（侧栏、页头胶囊、弹出层、工具条、提示）是玻璃，
+ * 内容层（卡片、表格）是不透光的「实心厚玻璃」。动效与折射由同目录的 liquid-glass.js 驱动，
+ * 不加载它页面照样能用：没有透镜，悬停退回叠一层薄暗；选中项画自己的底色。
+ * 原理、参数、踩过的坑见 references/。
+ *
+ * ── 目录 ──────────────────────────────────────────────────────────────
+ *   1 令牌（浅 / 深 / 跟随系统）        10 弹出菜单 .lg-menu
+ *   2 页面底 .lg-page                   11 命令面板 .lg-scrim / .lg-panel / .lg-list
+ *   3 玻璃材质 .lg-glass                12 工具条 .lg-toolbar
+ *   4 实心厚玻璃 .lg-card               13 表格 .lg-table-wrap / .lg-table
+ *   5 按钮 .lg-btn                      14 浮动提示 .lg-toasts / .lg-toast、玻璃提示 .lg-tip
+ *   6 玻璃胶囊 .lg-chip                 15 说明与报错 .lg-note / .lg-alert、浮起的卡片 .lg-dialog
+ *   7 输入框 .lg-field                  16 透镜、液态滑块、HDR 高光（liquid-glass.js 插入的元素）
+ *   8 分段开关 .lg-seg                  17 三档：精简 / 关闭
+ *   9 侧栏 .lg-sidebar / .lg-nav        18 无障碍、打印、老浏览器
+ *
+ * ── 贯穿全篇的规则 ────────────────────────────────────────────────────
+ *   · 悬停不改 background：改背景会把选中项的实底盖掉。有脚本时（<html data-lg-lens>）悬停是一颗
+ *     垫在字底下的清玻璃透镜；没有时退回 box-shadow: inset 0 0 0 999px var(--lg-hover)。
+ *   · 一块玻璃 = 宿主（位置、圆角、投影，背景透明）+ ::before（底色 + backdrop-filter）+ ::after（1.2px 高光环）。
+ *     滤镜不能直接挂在带投影的宿主上：Chromium 会按「含投影的溢出范围」算滤镜坐标，折射整片错位。
+ *   · 玻璃的祖先不能有 opacity < 1 / filter / mask / clip-path / backdrop-filter——它会变成「背景根」，
+ *     玻璃就只采得到它里面的东西、采不到页面。所以弹出动画只动 transform，不做淡入。
+ *   · data-theme 写在 <html> 上：--lg-pro-sh 这类「引用别的变量的变量」只在 :root 定义一次，
+ *     深色主题只改被引用的那几个，靠它们在同一个元素上求值。
+ */
+
+/* ══ 1 令牌 ═════════════════════════════════════════════════════════════
+ * 换品牌色：改 --lg-accent / --lg-accent-hover / --lg-ring / --lg-accent-glass、
+ * --lg-pro-top / --lg-pro-bot / --lg-pro-glow（浅深两套都要改），其余不用动。
+ */
+:root {
+  /* 基础 */
+  --lg-bg: #e8ecf2;
+  --lg-surface: #ffffff;
+  --lg-surface-2: #f2f5f9;
+  --lg-ink: #17202a;
+  --lg-ink-2: #5a6672;
+  --lg-ink-3: #8a95a1;
+  --lg-line: #dfe4ea;
+  --lg-line-strong: #c3ccd6;
+  --lg-accent: #2f6fe0;
+  --lg-accent-hover: #1c50b5;
+  --lg-on-accent: #ffffff;
+  --lg-ring: rgba(47, 111, 224, .24);
+  --lg-good: #0f6b3a;      --lg-good-bg: #e2f5ea;
+  --lg-warn: #7a5a09;      --lg-warn-bg: #fdf3d8;
+  --lg-err: #a01c1c;       --lg-err-bg: #fce6e6;     --lg-err-soft: #fff8f8;
+  --lg-hover: rgba(23, 32, 42, .10);
+  --lg-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+             "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif;
+  --lg-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --lg-r: 18px;
+  --lg-r-sm: 9px;
+  --lg-ctl-h: 36px;
+  --lg-ctl-h-sm: 30px;
+
+  /* 玻璃：底色（普通 / 工具条 / 弹出层 越来越实）、实色档、高光环、顶部柔光、轮廓、投影 */
+  --lg-well: rgba(23, 32, 42, .055);
+  --lg-accent-glass: rgba(47, 111, 224, .11);
+  --lg-err-glass: rgba(179, 38, 30, .07);
+  --lg-tint: rgba(255, 255, 255, .58);
+  --lg-tint-bar: rgba(251, 252, 254, .66);
+  --lg-tint-menu: rgba(250, 251, 253, .78);
+  --lg-tint-danger: rgba(255, 236, 235, .72);
+  --lg-solid: #f8fafc;
+  --lg-rim: linear-gradient(180deg, #ffffff, rgba(255, 255, 255, .42) 16%, rgba(255, 255, 255, .1) 42%, rgba(255, 255, 255, .08) 68%, rgba(255, 255, 255, .62));
+  --lg-sheen: radial-gradient(130% 90% at 16% -24%, rgba(255, 255, 255, .62), rgba(255, 255, 255, 0) 56%);
+  --lg-edge: 0 0 0 .5px rgba(15, 23, 42, .13);
+  --lg-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 14px 34px -10px rgba(15, 23, 42, .24);
+  --lg-shadow-lo: 0 1px 1.5px rgba(15, 23, 42, .08), 0 6px 16px -6px rgba(15, 23, 42, .2);
+
+  /* 着色玻璃：主操作（蓝）与危险（红）——上亮下深的渐变 + 上沿高光 + 同色光晕 */
+  --lg-pro-top: #4a86f0;   --lg-pro-bot: #2a66dc;   --lg-pro-glow: rgba(47, 111, 224, .5);
+  --lg-red-top: #d8433f;   --lg-red-bot: #b3261e;   --lg-red-glow: rgba(179, 38, 30, .45);
+  --lg-pro-sh: inset 0 1px 0 rgba(255, 255, 255, .32), inset 0 -1px 0 rgba(0, 0, 0, .08), 0 1px 1px rgba(15, 23, 42, .1), 0 8px 18px -8px var(--lg-pro-glow);
+  --lg-red-sh: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 -1px 0 rgba(0, 0, 0, .1), 0 1px 1px rgba(15, 23, 42, .1), 0 8px 18px -8px var(--lg-red-glow);
+  --lg-pro-sh-hover: inset 0 1px 0 rgba(255, 255, 255, .32), inset 0 -1px 0 rgba(0, 0, 0, .08), 0 2px 3px rgba(15, 23, 42, .1), 0 12px 24px -8px var(--lg-pro-glow);
+  --lg-red-sh-hover: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 -1px 0 rgba(0, 0, 0, .1), 0 2px 3px rgba(15, 23, 42, .1), 0 12px 24px -8px var(--lg-red-glow);
+  /* 白玻璃按钮。悬停的指尖光带一点主色——白光打在白按钮上等于没打 */
+  --lg-sec-bg: linear-gradient(180deg, #ffffff, #f6f8fb);
+  --lg-sec-sh: 0 0 0 .5px rgba(15, 23, 42, .2), 0 1px 1.5px rgba(15, 23, 42, .08), inset 0 1px 0 #ffffff;
+  --lg-sec-glow: rgba(47, 111, 224, .13);
+  --lg-sec-sh-hover: 0 0 0 .5px rgba(15, 23, 42, .28), 0 6px 14px -6px rgba(15, 23, 42, .28), inset 0 1px 0 #ffffff;
+  /* 玻璃按钮悬停时浮起多少；「精简」「关闭」里是 0（§17） */
+  --lg-lift: -1px;
+  /* 侧栏每一组菜单项垫的底板（iPadOS「设置」那样）；危险组的底板带一点红 */
+  --lg-plate: rgba(255, 255, 255, .72);
+  --lg-plate-sh: 0 0 0 .5px rgba(15, 23, 42, .07), 0 1px 2px rgba(15, 23, 42, .04);
+  --lg-plate-danger: rgba(179, 38, 30, .06);
+  --lg-plate-danger-sh: 0 0 0 .5px rgba(179, 38, 30, .14);
+  /* 凹槽上的白滑块、实心厚玻璃、输入框、遮罩 */
+  --lg-seg-thumb: #ffffff;
+  --lg-seg-sh: 0 1px 2px rgba(15, 23, 42, .14), 0 0 0 .5px rgba(15, 23, 42, .08);
+  --lg-card-sh: 0 0 0 .5px rgba(15, 23, 42, .09), 0 1px 2px rgba(15, 23, 42, .05), 0 10px 24px -16px rgba(15, 23, 42, .2), inset 0 1px 0 #ffffff;
+  --lg-fld: #f7f9fb;
+  --lg-fld-focus: #ffffff;
+  --lg-scrim: rgba(30, 40, 55, .18);
+  /* 透镜（悬停 / 键盘焦点那颗清玻璃） */
+  --lg-hl-tint: rgba(255, 255, 255, .5);
+  --lg-hl-under-tint: rgba(255, 255, 255, .72);
+  --lg-hl-glow: rgba(255, 255, 255, .9);
+  --lg-hl-edge: 0 0 0 .5px rgba(15, 23, 42, .14);
+  --lg-hl-sh: 0 1px 1px rgba(15, 23, 42, .06), 0 7px 16px -7px rgba(15, 23, 42, .34);
+  --lg-hl-solid: rgba(23, 32, 42, .07);
+  --lg-hl-onsel-tint: rgba(255, 255, 255, .08);
+  --lg-hl-rim: linear-gradient(165deg, #ffffff, rgba(255, 255, 255, .35) 30%, rgba(15, 23, 42, .04) 62%, rgba(15, 23, 42, .16));
+  --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .95), inset 0 -1px 2px rgba(15, 23, 42, .07);
+  --lg-toast-good: rgba(226, 245, 234, .82);
+  --lg-toast-bad: rgba(252, 230, 230, .86);
+}
+
+/* 深色：显式选择 */
+:root[data-theme="dark"] {
+  --lg-bg: #0e1217;
+  --lg-surface: #1a1f26;
+  --lg-surface-2: #21272f;
+  --lg-ink: #e6eaf0;
+  --lg-ink-2: #9aa5b2;
+  --lg-ink-3: #6f7a87;
+  --lg-line: #2c333c;
+  --lg-line-strong: #3b434e;
+  --lg-accent: #4d8ef5;
+  --lg-accent-hover: #7aa9f8;
+  --lg-ring: rgba(77, 142, 245, .32);
+  --lg-good: #5fd394;      --lg-good-bg: #14301f;
+  --lg-warn: #e0c46a;      --lg-warn-bg: #322710;
+  --lg-err: #f28c8c;       --lg-err-bg: #381b1b;     --lg-err-soft: #241a1a;
+  --lg-hover: rgba(255, 255, 255, .10);
+  --lg-well: rgba(255, 255, 255, .06);
+  --lg-accent-glass: rgba(77, 142, 245, .17);
+  --lg-err-glass: rgba(242, 140, 140, .1);
+  --lg-tint: rgba(30, 35, 43, .58);
+  --lg-tint-bar: rgba(24, 29, 36, .7);
+  --lg-tint-menu: rgba(28, 33, 41, .82);
+  --lg-tint-danger: rgba(80, 24, 24, .62);
+  --lg-solid: #1a2028;
+  --lg-rim: linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, .18) 16%, rgba(255, 255, 255, .05) 42%, rgba(255, 255, 255, .05) 68%, rgba(255, 255, 255, .3));
+  --lg-sheen: radial-gradient(130% 90% at 16% -24%, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 56%);
+  --lg-edge: 0 0 0 .5px rgba(0, 0, 0, .7);
+  --lg-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 16px 38px -10px rgba(0, 0, 0, .66);
+  --lg-shadow-lo: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 18px -6px rgba(0, 0, 0, .55);
+  --lg-pro-top: #5b97fa;   --lg-pro-bot: #3574e6;   --lg-pro-glow: rgba(77, 142, 245, .45);
+  --lg-red-top: #e0524d;   --lg-red-bot: #b8302a;   --lg-red-glow: rgba(224, 82, 77, .4);
+  --lg-sec-bg: rgba(255, 255, 255, .08);
+  --lg-sec-sh: 0 0 0 .5px rgba(255, 255, 255, .12), 0 1px 2px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .06);
+  --lg-sec-glow: rgba(255, 255, 255, .14);
+  --lg-sec-sh-hover: 0 0 0 .5px rgba(255, 255, 255, .2), 0 6px 14px -6px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .08);
+  --lg-plate: rgba(255, 255, 255, .045);
+  --lg-plate-sh: 0 0 0 .5px rgba(255, 255, 255, .07);
+  --lg-plate-danger: rgba(242, 140, 140, .07);
+  --lg-plate-danger-sh: 0 0 0 .5px rgba(242, 140, 140, .16);
+  --lg-seg-thumb: rgba(255, 255, 255, .17);
+  --lg-seg-sh: 0 1px 2px rgba(0, 0, 0, .4), 0 0 0 .5px rgba(255, 255, 255, .08);
+  --lg-card-sh: 0 0 0 .5px rgba(255, 255, 255, .07), 0 1px 2px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .04);
+  --lg-fld: rgba(0, 0, 0, .22);
+  --lg-fld-focus: rgba(0, 0, 0, .3);
+  --lg-scrim: rgba(6, 9, 13, .46);
+  --lg-hl-tint: rgba(255, 255, 255, .075);
+  --lg-hl-under-tint: rgba(255, 255, 255, .065);
+  --lg-hl-glow: rgba(255, 255, 255, .16);
+  --lg-hl-edge: 0 0 0 .5px rgba(0, 0, 0, .6);
+  --lg-hl-sh: 0 1px 1px rgba(0, 0, 0, .3), 0 8px 18px -6px rgba(0, 0, 0, .65);
+  --lg-hl-solid: rgba(255, 255, 255, .08);
+  --lg-hl-onsel-tint: rgba(255, 255, 255, .06);
+  --lg-hl-rim: linear-gradient(165deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .1) 30%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .22));
+  --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 -1px 2px rgba(0, 0, 0, .3);
+  --lg-toast-good: rgba(20, 48, 31, .82);
+  --lg-toast-bad: rgba(56, 27, 27, .84);
+}
+
+/* 深色：跟随系统（<html> 上没写 data-theme，或写的是 auto）。这一块必须与上面那块逐字一致，scripts/check.mjs 会比对 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --lg-bg: #0e1217;
+    --lg-surface: #1a1f26;
+    --lg-surface-2: #21272f;
+    --lg-ink: #e6eaf0;
+    --lg-ink-2: #9aa5b2;
+    --lg-ink-3: #6f7a87;
+    --lg-line: #2c333c;
+    --lg-line-strong: #3b434e;
+    --lg-accent: #4d8ef5;
+    --lg-accent-hover: #7aa9f8;
+    --lg-ring: rgba(77, 142, 245, .32);
+    --lg-good: #5fd394;      --lg-good-bg: #14301f;
+    --lg-warn: #e0c46a;      --lg-warn-bg: #322710;
+    --lg-err: #f28c8c;       --lg-err-bg: #381b1b;     --lg-err-soft: #241a1a;
+    --lg-hover: rgba(255, 255, 255, .10);
+    --lg-well: rgba(255, 255, 255, .06);
+    --lg-accent-glass: rgba(77, 142, 245, .17);
+    --lg-err-glass: rgba(242, 140, 140, .1);
+    --lg-tint: rgba(30, 35, 43, .58);
+    --lg-tint-bar: rgba(24, 29, 36, .7);
+    --lg-tint-menu: rgba(28, 33, 41, .82);
+    --lg-tint-danger: rgba(80, 24, 24, .62);
+    --lg-solid: #1a2028;
+    --lg-rim: linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, .18) 16%, rgba(255, 255, 255, .05) 42%, rgba(255, 255, 255, .05) 68%, rgba(255, 255, 255, .3));
+    --lg-sheen: radial-gradient(130% 90% at 16% -24%, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 56%);
+    --lg-edge: 0 0 0 .5px rgba(0, 0, 0, .7);
+    --lg-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 16px 38px -10px rgba(0, 0, 0, .66);
+    --lg-shadow-lo: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 18px -6px rgba(0, 0, 0, .55);
+    --lg-pro-top: #5b97fa;   --lg-pro-bot: #3574e6;   --lg-pro-glow: rgba(77, 142, 245, .45);
+    --lg-red-top: #e0524d;   --lg-red-bot: #b8302a;   --lg-red-glow: rgba(224, 82, 77, .4);
+    --lg-sec-bg: rgba(255, 255, 255, .08);
+    --lg-sec-sh: 0 0 0 .5px rgba(255, 255, 255, .12), 0 1px 2px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .06);
+    --lg-sec-glow: rgba(255, 255, 255, .14);
+    --lg-sec-sh-hover: 0 0 0 .5px rgba(255, 255, 255, .2), 0 6px 14px -6px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .08);
+    --lg-plate: rgba(255, 255, 255, .045);
+    --lg-plate-sh: 0 0 0 .5px rgba(255, 255, 255, .07);
+    --lg-plate-danger: rgba(242, 140, 140, .07);
+    --lg-plate-danger-sh: 0 0 0 .5px rgba(242, 140, 140, .16);
+    --lg-seg-thumb: rgba(255, 255, 255, .17);
+    --lg-seg-sh: 0 1px 2px rgba(0, 0, 0, .4), 0 0 0 .5px rgba(255, 255, 255, .08);
+    --lg-card-sh: 0 0 0 .5px rgba(255, 255, 255, .07), 0 1px 2px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .04);
+    --lg-fld: rgba(0, 0, 0, .22);
+    --lg-fld-focus: rgba(0, 0, 0, .3);
+    --lg-scrim: rgba(6, 9, 13, .46);
+    --lg-hl-tint: rgba(255, 255, 255, .075);
+    --lg-hl-under-tint: rgba(255, 255, 255, .065);
+    --lg-hl-glow: rgba(255, 255, 255, .16);
+    --lg-hl-edge: 0 0 0 .5px rgba(0, 0, 0, .6);
+    --lg-hl-sh: 0 1px 1px rgba(0, 0, 0, .3), 0 8px 18px -6px rgba(0, 0, 0, .65);
+    --lg-hl-solid: rgba(255, 255, 255, .08);
+    --lg-hl-onsel-tint: rgba(255, 255, 255, .06);
+    --lg-hl-rim: linear-gradient(165deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .1) 30%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .22));
+    --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 -1px 2px rgba(0, 0, 0, .3);
+    --lg-toast-good: rgba(20, 48, 31, .82);
+    --lg-toast-bad: rgba(56, 27, 27, .84);
+  }
+}
+
+/* ══ 2 页面底 ═══════════════════════════════════════════════════════════
+ * 纯色。不要为了「让玻璃有东西可折」给整页铺点阵、字纹之类的底纹——再轻也是噪声，
+ * 玻璃显不显得出来，靠的是真内容从它底下经过。
+ */
+.lg-page {
+  margin: 0; background: var(--lg-bg); color: var(--lg-ink);
+  font-family: var(--lg-sans); font-size: 14px; line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+.lg-page *, .lg-page *::before, .lg-page *::after { box-sizing: border-box; }
+[class*="lg-"][hidden] { display: none !important; }
+.lg-grow { flex: 1 1 auto; }
+.lg-shell { display: flex; align-items: stretch; min-height: 100vh; }
+.lg-main { flex: 1 1 auto; min-width: 0; padding: 16px 22px 40px 20px; }
+.lg-head { display: flex; align-items: center; flex-wrap: wrap; min-height: 44px; margin-bottom: 12px; }
+.lg-head h1 { margin: 0 12px 0 0; font-size: 21px; font-weight: 650; line-height: 1.35; }
+.lg-head .lg-chip + .lg-chip { margin-left: 10px; }
+.lg-kbd {
+  font-family: var(--lg-mono); font-size: 10.5px; line-height: 1.5; border-radius: 8px; padding: 1px 7px;
+  background: var(--lg-well); color: inherit;
+}
+
+/* ══ 3 玻璃材质 ═════════════════════════════════════════════════════════
+ * 凡是玻璃都带 .lg-glass。宿主自己不画背景（<button> 的浏览器默认底色也要清掉，不然同一种玻璃一个透一个实）；
+ * 宿主要是层叠上下文，否则 z-index:-1 的 ::before 会沉到页面底下去。
+ * 局部变量：--lg-t 底色、--lg-b 模糊半径、--lg-s 实色档的底色、--lg-rw 高光环宽度、--lg-ref 折射滤镜（脚本写）。
+ */
+.lg-glass {
+  position: relative; z-index: 0; background: transparent; border: 0;
+  box-shadow: var(--lg-edge), var(--lg-shadow-lo);
+}
+.lg-glass::before {
+  content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: -1;
+  border-radius: inherit; pointer-events: none;
+  background: var(--lg-sheen), var(--lg-t, var(--lg-tint));
+  -webkit-backdrop-filter: blur(var(--lg-b, 14px)) saturate(1.8);
+  backdrop-filter: blur(var(--lg-b, 14px)) saturate(1.8);
+}
+/* 边缘高光环：上沿最亮、两侧渐暗、下沿再亮一点（光在玻璃里反射到对边）。渐变 + 遮罩挖成一圈 */
+.lg-glass::after {
+  content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 3;
+  border-radius: inherit; pointer-events: none; padding: var(--lg-rw, 1.2px);
+  background: var(--lg-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+/* 背后是正文的（弹出层）要更实：字叠字读不清 */
+.lg-glass--menu { --lg-t: var(--lg-tint-menu); --lg-b: 24px; }
+/* 背后有内容滚过的（工具条、保存条） */
+.lg-glass--bar { --lg-t: var(--lg-tint-bar); --lg-b: 12px; }
+/* l2 / l3：折射。先模糊、再位移（反过来位移出的清晰边缘又被糊掉） */
+html[data-lg-tier="l2"] .lg-glass[data-lg-refract-on]::before,
+html[data-lg-tier="l3"] .lg-glass[data-lg-refract-on]::before {
+  backdrop-filter: blur(var(--lg-b, 14px)) var(--lg-ref) saturate(1.8) brightness(1.03);
+}
+/* l0：实色。形状、高光环、投影都还在，只是不透 */
+html[data-lg-tier="l0"] .lg-glass::before {
+  background: var(--lg-s, var(--lg-solid)); -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+@keyframes lg-pop { from { transform: translateY(-8px) scale(.92); } to { transform: none; } }
+
+/* ══ 4 实心厚玻璃：卡片 ═════════════════════════════════════════════════
+ * 内容层不做成玻璃：里面全是要读的东西，背后透出东西会干扰阅读，玻璃叠玻璃会糊。
+ * 用和玻璃同一种高光语言（半像素轮廓 + 上沿 1px 亮线），看着是同一套材质的实心版。没有描边线——描边是纸的语言。
+ */
+.lg-card { background: var(--lg-surface); border: 0; border-radius: var(--lg-r); padding: 16px 18px; box-shadow: var(--lg-card-sh); }
+.lg-card + .lg-card { margin-top: 14px; }
+.lg-card-title { margin: 0 0 8px; font-size: 14px; font-weight: 650; }
+.lg-hint { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--lg-ink-2); }
+
+/* ══ 5 按钮 ═════════════════════════════════════════════════════════════
+ * 玻璃胶囊。主操作蓝、危险红：颜色「从玻璃里透出来」（上亮下深 + 上沿高光 + 同色光晕），不是贴一块色纸；
+ * 默认（次要操作）是白玻璃。三种悬停是同一套动作：浮起 1px（弹簧曲线）+ 投影加深 + 指尖光跟着指针走；
+ * 按下缩到 96.5%。指尖光的位置 --mx / --my 由脚本写，没有脚本时停在上方正中。
+ */
+.lg-btn {
+  height: var(--lg-ctl-h); display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 16px; border: 0; border-radius: 999px; font: inherit; font-size: 13.5px; line-height: 1;
+  white-space: nowrap; cursor: pointer; text-decoration: none; vertical-align: middle;
+  color: var(--lg-ink); background: var(--lg-sec-bg); box-shadow: var(--lg-sec-sh);
+  transition: transform .32s cubic-bezier(.3, 1.6, .5, 1), box-shadow .2s ease;
+}
+.lg-btn:hover {
+  transform: translateY(var(--lg-lift, -1px));
+  background: radial-gradient(90px circle at var(--mx, 50%) var(--my, 20%), var(--lg-sec-glow), transparent 70%), var(--lg-sec-bg);
+  box-shadow: var(--lg-sec-sh-hover);
+}
+.lg-btn--primary { color: var(--lg-on-accent); font-weight: 600; padding: 0 18px; background: linear-gradient(180deg, var(--lg-pro-top), var(--lg-pro-bot)); box-shadow: var(--lg-pro-sh); }
+.lg-btn--primary:hover {
+  background: radial-gradient(90px circle at var(--mx, 50%) var(--my, 20%), rgba(255, 255, 255, .32), rgba(255, 255, 255, 0) 70%),
+              linear-gradient(180deg, var(--lg-pro-top), var(--lg-pro-bot));
+  box-shadow: var(--lg-pro-sh-hover);
+}
+.lg-btn--danger { color: #ffffff; font-weight: 600; padding: 0 20px; background: linear-gradient(180deg, var(--lg-red-top), var(--lg-red-bot)); box-shadow: var(--lg-red-sh); }
+.lg-btn--danger:hover {
+  background: radial-gradient(90px circle at var(--mx, 50%) var(--my, 20%), rgba(255, 255, 255, .3), rgba(255, 255, 255, 0) 70%),
+              linear-gradient(180deg, var(--lg-red-top), var(--lg-red-bot));
+  box-shadow: var(--lg-red-sh-hover);
+}
+.lg-btn--sm { height: var(--lg-ctl-h-sm); font-size: 13px; padding: 0 13px; }
+/* 按下写在悬停后面：两条一样具体，后写的赢——写反了按下时还浮着、不缩 */
+.lg-btn:active { transform: scale(.965); }
+/* 禁用：不发光、不回弹。旁边要写明为什么点不动 */
+.lg-btn:disabled, .lg-btn:disabled:hover, .lg-btn[aria-disabled="true"] {
+  background: var(--lg-surface-2); color: var(--lg-ink-3); cursor: default;
+  box-shadow: inset 0 0 0 1px var(--lg-line); transform: none;
+}
+.lg-btn .lg-kbd { margin-left: 8px; background: rgba(255, 255, 255, .2); }
+.lg-btn:not(.lg-btn--primary):not(.lg-btn--danger) .lg-kbd { background: var(--lg-well); }
+.lg-actions { display: flex; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.lg-actions > * + * { margin-left: 10px; }
+.lg-actions > .lg-grow + * { margin-left: 0; }
+
+/* ══ 6 玻璃胶囊：页头上可按的玻璃（当前环境、搜索入口……） ══════════════
+ * 和按钮同一套动作：浮起、投影加深、指尖光（画在 ::before 上），按下缩一点。
+ * 两颗并排时颜色、透明度必须一样——都用 .lg-chip，别一颗是 <button> 一颗是 <div> 各写各的。
+ */
+.lg-chip {
+  display: inline-flex; align-items: center; height: var(--lg-ctl-h); max-width: 440px;
+  padding: 0 14px 0 13px; border-radius: 18px; font: inherit; font-size: 12.5px; line-height: 1;
+  color: var(--lg-ink); white-space: nowrap; cursor: pointer; text-decoration: none;
+  transition: transform .32s cubic-bezier(.3, 1.6, .5, 1), box-shadow .2s ease;
+  --lg-b: 10px;
+}
+.lg-chip:hover::before {
+  background: radial-gradient(90px circle at var(--mx, 50%) var(--my, 20%), var(--lg-sec-glow), transparent 70%),
+              var(--lg-sheen), var(--lg-t, var(--lg-tint));
+}
+.lg-chip:hover { --lg-rw: 1.5px; transform: translateY(var(--lg-lift, -1px)); box-shadow: var(--lg-edge), var(--lg-shadow); }
+.lg-chip:active { transform: scale(.965); }
+.lg-chip--danger { --lg-t: var(--lg-tint-danger); --lg-s: var(--lg-err-soft); }
+.lg-chip-muted { color: var(--lg-ink-2); margin-right: 6px; }
+.lg-chip-strong { font-weight: 650; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lg-chip-caret { margin-left: 8px; color: var(--lg-ink-3); font-size: 10px; }
+.lg-chip-ico { width: 15px; height: 15px; flex: none; margin-right: 8px; }
+.lg-chip .lg-kbd { margin-left: 12px; }
+.lg-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-right: 8px; background: #4ea875; box-shadow: 0 0 0 3px rgba(47, 179, 107, .2); }
+.lg-dot--bad { background: var(--lg-red-top); box-shadow: 0 0 0 3px rgba(216, 67, 63, .2); }
+
+/* ══ 7 输入框：玻璃凹槽 ═════════════════════════════════════════════════
+ * 底色比卡片略深 + 内侧一道浅阴影，像压进去的一道槽；聚焦时底变亮、描边变主色、外发光圈，像槽里亮起来。
+ * 同一行的输入框与按钮一律 36px 高，只留水平内边距——字号一差，用垂直 padding 凑的高度就不齐。
+ */
+.lg-field {
+  display: block; width: 100%; height: var(--lg-ctl-h); padding: 0 12px;
+  border: 1px solid var(--lg-line-strong); border-radius: var(--lg-r-sm);
+  font: inherit; font-size: 13.5px; color: var(--lg-ink); background: var(--lg-fld);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, .06);
+  transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
+}
+textarea.lg-field { height: auto; min-height: 84px; padding: 8px 12px; line-height: 1.7; resize: vertical; }
+select.lg-field {
+  -webkit-appearance: none; -moz-appearance: none; appearance: none; padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a95a1' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center; background-size: 14px;
+}
+.lg-field:hover:not(:disabled):not(:focus) { border-color: var(--lg-ink-3); }
+.lg-field:focus {
+  outline: none; border-color: var(--lg-accent); background-color: var(--lg-fld-focus);
+  box-shadow: 0 0 0 4px var(--lg-ring), 0 8px 20px -12px var(--lg-pro-glow);
+}
+.lg-field::placeholder { color: var(--lg-ink-3); opacity: 1; }
+.lg-field:disabled { background: var(--lg-surface-2); color: var(--lg-ink-3); }
+.lg-label { display: block; margin: 0 0 6px; font-size: 12.5px; font-weight: 600; }
+.lg-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+/* 一行里的筛选条件 + 按钮（搜索框、下拉、「搜索」「重置」）：底边对齐，放不下自动换行 */
+.lg-fields { display: flex; flex-wrap: wrap; align-items: flex-end; margin: -6px; }
+.lg-fields > * { margin: 6px; }
+.lg-fields > div { flex: 0 1 200px; min-width: 140px; }
+.lg-field--auto { display: inline-block; width: auto; }
+
+/* ══ 8 分段开关：凹槽 + 白玻璃滑块 ══════════════════════════════════════
+ * 所有「多选一」都用它：一道浅凹槽，选中那项上面浮一块白玻璃（有脚本时它会「流」过去）。
+ * 选中只改 aria-pressed（或 aria-selected），滑块自己跟过去。
+ */
+.lg-seg {
+  display: inline-flex; position: relative; vertical-align: middle;
+  padding: 3px; border-radius: 18px; background: var(--lg-well);
+}
+.lg-seg > button {
+  position: relative; height: 30px; padding: 0 14px; border: 0; border-radius: 15px;
+  background: transparent; color: var(--lg-ink-2); font: inherit; font-size: 13px; line-height: 1;
+  white-space: nowrap; cursor: pointer; transition: color .2s ease;
+}
+.lg-seg > button + button { margin-left: 2px; }
+.lg-seg > button[aria-pressed="true"], .lg-seg > button[aria-selected="true"] {
+  background: var(--lg-seg-thumb); box-shadow: var(--lg-seg-sh); color: var(--lg-ink); font-weight: 600;
+}
+/* 有液态滑块时选中项自己不画底，底是滑块 */
+.lg-seg[data-lg-slider-on] > button[aria-pressed="true"], .lg-seg[data-lg-slider-on] > button[aria-selected="true"] {
+  background: transparent; box-shadow: none;
+}
+.lg-seg--sm { padding: 2px; border-radius: 15px; }
+.lg-seg--sm > button { height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600; }
+.lg-seg--block { display: flex; }
+.lg-seg--block > button { flex: 1 1 0; padding: 0; }
+
+/* ══ 9 侧栏 ═════════════════════════════════════════════════════════════
+ * 一块浮在页面底上的玻璃板：离窗口边 12px、圆角 24px。侧栏自己不滚，中间的 .lg-nav 滚——
+ * 侧栏若是滚动容器，::before 那层玻璃会跟着内容一起滚走。
+ *
+ * 菜单照 iPadOS「设置」的侧栏：每一组菜单项垫一块圆角底板（.lg-nav-plate），组名是底板上方一行小灰字，
+ * 紧贴它那块底板（4px）、和上一块底板隔开 14px——离谁近就属于谁，一眼看出一项属于哪一组。
+ * 收起箭头紧跟在组名后面（隔一整行挂在最右边，看不出它是这一组的）。
+ * 菜单项 32px 高、16px 线性图标、不垫圆形徽章（一列灰圆点会连成一根竖柱，把分组冲散）；
+ * 右边的数字快捷键平时不显示，鼠标进了菜单才浮出来。
+ */
+.lg-sidebar {
+  width: 236px; flex: none; display: flex; flex-direction: column;
+  padding: 12px 10px; margin: 12px 0 12px 12px; border-radius: 24px;
+  position: sticky; top: 12px; align-self: flex-start; z-index: 20; height: calc(100vh - 24px);
+  color: var(--lg-ink); box-shadow: var(--lg-edge), var(--lg-shadow);
+  --lg-b: 18px;
+}
+.lg-sidebar > * + * { margin-top: 10px; }
+.lg-brand { display: flex; align-items: center; flex: none; position: relative; padding: 0 0 0 4px; }
+.lg-brand-mark {
+  width: 32px; height: 32px; flex: none; border-radius: 10px; color: #ffffff;
+  background: linear-gradient(180deg, var(--lg-pro-top), var(--lg-pro-bot));
+  display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 750;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), inset 0 -1px 0 rgba(0, 0, 0, .12), 0 4px 10px -4px var(--lg-pro-glow);
+}
+.lg-brand-text { display: flex; flex-direction: column; justify-content: center; min-width: 0; margin-left: 10px; }
+.lg-brand-name { font-size: 14px; font-weight: 650; line-height: 1.25; white-space: nowrap; }
+.lg-brand-sub { font-size: 11.5px; color: var(--lg-ink-3); line-height: 1.3; white-space: nowrap; }
+/* 圆形的小图标按钮（折叠侧栏之类） */
+.lg-icon-btn {
+  width: 30px; height: 30px; flex: none; padding: 0; border: 0; border-radius: 15px;
+  background: var(--lg-well); color: var(--lg-ink-3); font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
+}
+
+.lg-nav {
+  display: flex; flex-direction: column; position: relative;
+  flex: 0 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
+  margin-left: -6px; margin-right: -6px; padding: 4px 6px; scrollbar-width: thin;
+}
+.lg-sidebar > .lg-nav { margin-top: 6px; }
+.lg-nav-group {
+  display: flex; align-items: center; width: 100%; height: 24px; padding: 0 10px; border: 0; border-radius: 12px;
+  background: transparent; font: inherit; text-align: left; line-height: 1.4; white-space: nowrap;
+  color: var(--lg-ink-2); cursor: pointer;
+}
+.lg-nav-group + .lg-nav-plate { margin-top: 4px; }
+.lg-nav-plate + .lg-nav-group { margin-top: 14px; }
+.lg-nav-group-title { order: 1; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.lg-nav-group-badge {
+  order: 2; margin-left: 8px; padding: 1px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; line-height: 1.5;
+  color: var(--lg-err); background: var(--lg-err-bg);
+}
+.lg-nav-group-count {
+  order: 3; display: none; margin-left: 8px; padding: 0 6px; border-radius: 999px; background: var(--lg-well);
+  font-size: 10.5px; font-weight: 650; line-height: 1.6; color: var(--lg-ink-3); font-variant-numeric: tabular-nums;
+}
+.lg-nav-group-caret {
+  order: 4; margin-left: 4px; width: 12px; height: 12px; flex: none; color: var(--lg-ink-3); opacity: .6;
+  transition: transform .35s cubic-bezier(.3, 1.5, .5, 1), opacity .2s ease;
+}
+.lg-nav-group:hover .lg-nav-group-caret, .lg-nav-group:focus-visible .lg-nav-group-caret { opacity: 1; }
+.lg-nav-group[aria-expanded="true"] .lg-nav-group-caret { transform: rotate(90deg); }
+.lg-nav-group[aria-expanded="false"] .lg-nav-group-count { display: inline-block; }
+/* 收起的组里有当前页：组名染成选中色，不至于「页面开着、菜单里找不到它」（data-has-active 由页面脚本写） */
+.lg-nav-group[data-has-active] .lg-nav-group-title, .lg-nav-group[data-has-active] .lg-nav-group-caret { color: var(--lg-accent); }
+.lg-nav-group--danger[aria-expanded="false"] .lg-nav-group-caret { color: var(--lg-err); opacity: 1; }
+.lg-nav-group--danger[data-has-active] .lg-nav-group-title, .lg-nav-group--danger[data-has-active] .lg-nav-group-caret { color: var(--lg-err); }
+/* 一组菜单项的底板。圆角 14 = 菜单项圆角 10 + 内边距 4（同心） */
+.lg-nav-plate {
+  display: flex; flex-direction: column; padding: 4px; border-radius: 14px;
+  background: var(--lg-plate); box-shadow: var(--lg-plate-sh);
+}
+.lg-nav-plate--danger { background: var(--lg-plate-danger); box-shadow: var(--lg-plate-danger-sh); }
+.lg-nav-item + .lg-nav-item { margin-top: 1px; }
+.lg-nav-item {
+  display: flex; align-items: center; width: 100%; height: 32px; padding: 0 10px 0 8px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--lg-ink);
+  font: inherit; text-align: left; text-decoration: none; cursor: pointer;
+}
+/* 图标 16px、不垫底色。透镜盖住这一项时图标比文字多放大一点（--m 是透镜盖住它的比例，脚本写） */
+.lg-nav-icon {
+  width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center;
+  color: var(--lg-ink-2); transform: scale(calc(1 + .08 * var(--m, 0)));
+}
+.lg-nav-icon svg { width: 16px; height: 16px; display: block; }
+.lg-nav-label { flex: 1 1 auto; min-width: 0; margin-left: 9px; font-size: 13.5px; font-weight: 450; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-nav-key { margin-left: 9px; font-family: var(--lg-mono); font-size: 11px; opacity: 0; transition: opacity .2s ease; }
+.lg-nav:hover .lg-nav-key, .lg-nav:focus-within .lg-nav-key { opacity: .5; }
+.lg-nav-item[aria-selected="true"], .lg-nav-item[aria-current="page"] {
+  background: linear-gradient(180deg, var(--lg-pro-top), var(--lg-pro-bot)); color: #ffffff; box-shadow: var(--lg-pro-sh);
+}
+.lg-nav-item[aria-selected="true"] .lg-nav-label, .lg-nav-item[aria-current="page"] .lg-nav-label { font-weight: 600; }
+.lg-nav-item[aria-selected="true"] .lg-nav-icon, .lg-nav-item[aria-current="page"] .lg-nav-icon { color: #ffffff; }
+.lg-nav-item--danger .lg-nav-icon { color: var(--lg-err); }
+.lg-nav-item--danger[aria-selected="true"], .lg-nav-item--danger[aria-current="page"] {
+  background: linear-gradient(180deg, var(--lg-red-top), var(--lg-red-bot)); box-shadow: var(--lg-red-sh);
+}
+/* 有液态滑块时选中项自己不画底，底是滑块 */
+.lg-nav[data-lg-slider-on] .lg-nav-item[aria-selected="true"], .lg-nav[data-lg-slider-on] .lg-nav-item[aria-current="page"] {
+  background: transparent; box-shadow: none;
+}
+
+/* 侧栏底部：一排排「标签 + 分段开关」，再加账号 */
+.lg-sidebar-foot { flex: none; padding: 0 2px; }
+.lg-row { display: flex; align-items: center; }
+.lg-row + .lg-row { margin-top: 8px; }
+.lg-row-label { width: 40px; flex: none; padding-left: 4px; font-size: 12px; color: var(--lg-ink-3); }
+.lg-row > .lg-seg { flex: 1 1 auto; }
+/* 没有脚本时三档开关按不动，不摆出来。看 data-lg-js 不看 data-lg-lens：「关闭」时 data-lg-lens 会被撤掉，
+   开关要是跟着消失，就再也点不回来了 */
+html:not([data-lg-js]) .lg-mode-row { display: none; }
+.lg-account { display: flex; align-items: center; position: relative; height: 30px; margin-top: 10px; padding-left: 4px; font-size: 12.5px; }
+.lg-account-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-pill-btn {
+  flex: none; height: 26px; padding: 0 12px; border: 0; border-radius: 13px; background: var(--lg-well);
+  font: inherit; font-size: 12px; color: var(--lg-ink-2); cursor: pointer;
+}
+
+/* 折叠：只留图标的一条竖轨（<aside class="lg-sidebar" data-collapsed="true">）。
+   危险项保留红底——没有文字时颜色是唯一线索；底板照样垫着，靠它分组 */
+.lg-sidebar[data-collapsed="true"] { width: 64px; padding: 12px 8px; align-items: center; }
+.lg-sidebar[data-collapsed="true"] .lg-brand { flex-direction: column; padding: 0; }
+.lg-sidebar[data-collapsed="true"] .lg-brand-text,
+.lg-sidebar[data-collapsed="true"] .lg-brand .lg-grow,
+.lg-sidebar[data-collapsed="true"] .lg-nav-label,
+.lg-sidebar[data-collapsed="true"] .lg-nav-key,
+.lg-sidebar[data-collapsed="true"] .lg-nav-group-title,
+.lg-sidebar[data-collapsed="true"] .lg-nav-group-badge,
+.lg-sidebar[data-collapsed="true"] .lg-account-name,
+.lg-sidebar[data-collapsed="true"] .lg-row { display: none; }
+.lg-sidebar[data-collapsed="true"] .lg-brand .lg-icon-btn { width: 32px; height: 28px; border-radius: 14px; margin: 10px 0 0; }
+.lg-sidebar[data-collapsed="true"] .lg-nav { align-self: stretch; align-items: center; }
+.lg-sidebar[data-collapsed="true"] .lg-nav-group { width: 40px; padding: 0; margin: 4px auto 0; justify-content: center; }
+.lg-sidebar[data-collapsed="true"] .lg-nav-group-caret { order: 0; margin: 0; opacity: 1; }
+.lg-sidebar[data-collapsed="true"] .lg-nav-group-count { margin-left: 3px; padding: 0 4px; }
+.lg-sidebar[data-collapsed="true"] .lg-nav-plate { align-items: center; }
+.lg-sidebar[data-collapsed="true"] .lg-nav-plate + .lg-nav-group { margin-top: 10px; }
+.lg-sidebar[data-collapsed="true"] .lg-nav-item { width: 40px; height: 34px; padding: 0; justify-content: center; }
+.lg-sidebar[data-collapsed="true"] .lg-nav-icon svg { width: 17px; height: 17px; }
+.lg-sidebar[data-collapsed="true"] .lg-nav-item--danger { background: var(--lg-err-bg); }
+.lg-sidebar[data-collapsed="true"] .lg-nav-item--danger[aria-selected="true"],
+.lg-sidebar[data-collapsed="true"] .lg-nav-item--danger[aria-current="page"] { background: linear-gradient(180deg, var(--lg-red-top), var(--lg-red-bot)); }
+.lg-sidebar[data-collapsed="true"] .lg-nav[data-lg-slider-on] .lg-nav-item--danger[aria-selected="true"],
+.lg-sidebar[data-collapsed="true"] .lg-nav[data-lg-slider-on] .lg-nav-item--danger[aria-current="page"] { background: transparent; }
+.lg-sidebar[data-collapsed="true"] .lg-sidebar-foot { padding: 0; }
+.lg-sidebar[data-collapsed="true"] .lg-account { justify-content: center; margin: 0; padding: 0; }
+
+/* ══ 10 弹出菜单 ════════════════════════════════════════════════════════
+ * 更厚、更实的玻璃（背后是正文）。弹出只动 transform：opacity < 1 的那几百毫秒里玻璃「采不到背景」，一淡入就跳亮。
+ * 很长的菜单：别让 .lg-menu 自己滚（玻璃层会跟着滚走），在里面包一层滚动的容器，并把 data-lg-lens 挂在那层上。
+ */
+.lg-menu {
+  position: fixed; z-index: 70; width: 320px; max-width: calc(100vw - 24px);
+  padding: 8px; border-radius: 20px; box-shadow: var(--lg-edge), var(--lg-shadow);
+  transform-origin: top center; animation: lg-pop .42s cubic-bezier(.3, 1.4, .5, 1) both;
+  --lg-t: var(--lg-tint-menu); --lg-b: 24px;
+}
+.lg-menu-title { padding: 5px 12px 6px; font-size: 11.5px; font-weight: 600; color: var(--lg-ink-2); }
+.lg-menu-item {
+  display: flex; align-items: flex-start; width: 100%; padding: 9px 12px; border: 0; border-radius: 14px;
+  background: transparent; color: var(--lg-ink); font: inherit; font-size: 13.5px; line-height: 1.45;
+  text-align: left; white-space: normal; cursor: pointer;
+}
+.lg-menu-item + .lg-menu-item { margin-top: 2px; }
+.lg-menu-item[aria-checked="true"] { background: var(--lg-accent-glass); }
+.lg-menu-item:disabled { opacity: .6; cursor: not-allowed; }
+.lg-menu-sep { height: 1px; margin: 6px 10px; background: var(--lg-line); }
+.lg-menu-sub { display: block; font-size: 11.5px; color: var(--lg-ink-2); }
+/* 单选圈：当前那项打实心圆 */
+.lg-radio { width: 16px; height: 16px; flex: none; margin: 2px 10px 0 0; border-radius: 50%; border: 1.5px solid var(--lg-line-strong); background: var(--lg-surface); }
+[aria-checked="true"] > .lg-radio { border: 5px solid var(--lg-accent); background: #ffffff; }
+
+/* ══ 11 命令面板 ════════════════════════════════════════════════════════
+ * 遮罩只调暗、不模糊：遮罩一旦带 backdrop-filter，里面的面板就只采得到遮罩，采不到页面。
+ * 列表每按一次方向键整片重画也没关系：滑块的状态存在 .lg-list 上，新画出来的光标从原位置接着滑。
+ */
+.lg-scrim {
+  position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 80; background: var(--lg-scrim);
+  display: flex; align-items: flex-start; justify-content: center; padding: 90px 16px 16px;
+}
+.lg-panel {
+  width: 520px; max-width: 92vw; border-radius: 24px; overflow: hidden;
+  box-shadow: var(--lg-edge), var(--lg-shadow);
+  transform-origin: top center; animation: lg-pop .42s cubic-bezier(.3, 1.4, .5, 1) both;
+  --lg-t: var(--lg-tint-menu); --lg-b: 24px;
+}
+.lg-panel-input {
+  display: block; width: 100%; height: 52px; padding: 0 18px; border: 0; border-bottom: 1px solid var(--lg-line);
+  background: transparent; color: var(--lg-ink); font: inherit; font-size: 14px; outline: none;
+}
+.lg-panel-foot { padding: 9px 18px; border-top: 1px solid var(--lg-line); font-size: 11.5px; color: var(--lg-ink-3); }
+.lg-list { position: relative; max-height: 60vh; overflow: auto; padding: 8px; }
+.lg-list-item {
+  display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 9px 12px;
+  border: 0; border-radius: 12px; background: transparent; color: var(--lg-ink);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.lg-list-item.is-cursor, .lg-list-item[aria-selected="true"] { background: var(--lg-accent-glass); }
+.lg-list[data-lg-slider-on] .lg-list-item.is-cursor, .lg-list[data-lg-slider-on] .lg-list-item[aria-selected="true"] { background: transparent; }
+.lg-list-meta { margin-left: 10px; font-family: var(--lg-mono); font-size: 11px; color: var(--lg-ink-3); }
+.lg-list-empty { padding: 14px 12px; font-size: 12.5px; color: var(--lg-ink-3); }
+
+/* ══ 12 工具条 ══════════════════════════════════════════════════════════
+ * 一条玻璃：表格上方的筛选条、页面底部粘住的保存条（.lg-toolbar--sticky，表单从它底下滚过，所以默认折射）。
+ */
+.lg-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap; min-height: 48px; padding: 6px 10px;
+  border-radius: 18px; --lg-t: var(--lg-tint-bar); --lg-b: 12px;
+}
+.lg-toolbar > * + * { margin-left: 10px; }
+.lg-toolbar > .lg-grow + * { margin-left: 0; }
+.lg-toolbar--sticky { position: sticky; bottom: 14px; z-index: 10; box-shadow: var(--lg-edge), var(--lg-shadow); --lg-b: 14px; }
+.lg-count { font-size: 12px; color: var(--lg-ink-3); font-variant-numeric: tabular-nums; }
+
+/* ══ 13 表格 ════════════════════════════════════════════════════════════
+ * 实心厚玻璃的容器 + 粘住的表头。行悬停是一块垫在行底下的亮板（整行形态的透镜：不放大、不折射、不跟手）。
+ */
+.lg-table-wrap { position: relative; overflow: auto; background: var(--lg-surface); border-radius: var(--lg-r); box-shadow: var(--lg-card-sh); }
+.lg-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lg-table th, .lg-table td { padding: 9px 14px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--lg-line); }
+.lg-table thead th {
+  position: sticky; top: 0; z-index: 3; background: var(--lg-surface-2);
+  font-size: 12px; font-weight: 600; color: var(--lg-ink-2);
+}
+.lg-table tbody tr:last-child td { border-bottom: 0; }
+.lg-table .lg-num { text-align: right; font-variant-numeric: tabular-nums; }
+.lg-badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 650; line-height: 1.5; white-space: nowrap; }
+.lg-badge--good { color: var(--lg-good); background: var(--lg-good-bg); }
+.lg-badge--warn { color: var(--lg-warn); background: var(--lg-warn-bg); }
+.lg-badge--bad { color: var(--lg-err); background: var(--lg-err-bg); }
+
+/* ══ 14 浮动提示与玻璃提示 ══════════════════════════════════════════════ */
+.lg-toasts { position: fixed; right: 18px; top: 18px; z-index: 90; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+.lg-toast {
+  max-width: 360px; margin-top: 8px; padding: 10px 16px; border-radius: 18px;
+  font-size: 12.5px; font-weight: 600; line-height: 1.5; color: var(--lg-ink); pointer-events: auto;
+  box-shadow: var(--lg-edge), var(--lg-shadow);
+  transform-origin: top right; animation: lg-pop .42s cubic-bezier(.3, 1.4, .5, 1) both;
+  --lg-t: var(--lg-tint-menu); --lg-b: 20px;
+}
+.lg-toast--good { color: var(--lg-good); --lg-t: var(--lg-toast-good); --lg-s: var(--lg-good-bg); }
+.lg-toast--bad { color: var(--lg-err); --lg-t: var(--lg-toast-bad); --lg-s: var(--lg-err-bg); }
+/* 代替浏览器原生 title 小黄框的玻璃气泡（脚本插入） */
+.lg-tip {
+  position: fixed; z-index: 95; max-width: 320px; padding: 6px 12px; border-radius: 14px;
+  font-size: 12.5px; font-weight: 600; line-height: 1.5; color: var(--lg-ink); white-space: normal; pointer-events: none;
+  transform-origin: top center; animation: lg-pop .3s cubic-bezier(.3, 1.4, .5, 1) both;
+  --lg-t: var(--lg-tint-menu); --lg-b: 20px;
+}
+.lg-tip[data-side="right"] { transform-origin: left center; }
+
+/* ══ 15 说明与报错、浮起的卡片 ══════════════════════════════════════════
+ * 两种话分开：.lg-note 是「为什么会这样」的说明（已退出、会话过期、已保存）——灰色，不吓人；
+ * .lg-alert 才是真出错（口令不对、提交失败）——红色。都是「图标 + 一句话」，不用贴着圆角弯过去的左侧竖条。
+ */
+.lg-note, .lg-alert {
+  display: flex; align-items: flex-start; margin: 0; padding: 8px 12px; border-radius: 12px;
+  font-size: 12.5px; line-height: 1.55;
+}
+.lg-note::before, .lg-alert::before {
+  content: ""; width: 16px; height: 16px; flex: none; margin: 1px 8px 0 0;
+  background-repeat: no-repeat; background-position: center; background-size: 16px;
+}
+.lg-note { background: var(--lg-well); color: var(--lg-ink-2); }
+.lg-note::before, .lg-note[data-kind="info"]::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234d8ef5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v5.5'/%3E%3Cpath d='M12 7.6h.01'/%3E%3C/svg%3E"); }
+.lg-note[data-kind="ok"]::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f9e62' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M8 12.5l2.7 2.7L16 9.8'/%3E%3C/svg%3E"); }
+.lg-alert { background: var(--lg-err-bg); color: var(--lg-err); }
+.lg-alert::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d8433f' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5'/%3E%3Cpath d='M12 16.4h.01'/%3E%3C/svg%3E"); }
+.lg-note + .lg-note, .lg-note + .lg-alert, .lg-alert + .lg-note, .lg-alert + .lg-alert { margin-top: 8px; }
+/* 浮在页面正中的玻璃卡片（登录框、欢迎页）：背后是纯色，用弹出层那种更实的玻璃，不折射 */
+.lg-dialog {
+  width: 380px; max-width: 100%; padding: 34px 32px 24px; border-radius: 30px;
+  box-shadow: var(--lg-edge), 0 2px 6px rgba(15, 23, 42, .08), 0 40px 90px -30px rgba(15, 23, 42, .45);
+  --lg-t: var(--lg-tint-menu); --lg-b: 18px;
+}
+.lg-center { position: relative; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+
+/* ══ 16 透镜、液态滑块、HDR 高光 ════════════════════════════════════════
+ * 这些元素由 liquid-glass.js 插入，位置、形变、透明度按弹簧逐帧写进来（transform / --a / --p），这里只管长相。
+ */
+
+/* 透镜：悬停 / 键盘焦点 = 一颗清玻璃。每块面板只有一颗，垫在内容下面。
+   外层 .lg-lens 不带投影、不改 opacity：外层透明度 < 1 会让里面的玻璃采不到背景，一淡入就跳亮 */
+.lg-lens {
+  position: absolute; left: 0; top: 0; width: 0; height: 0; margin: 0 !important; z-index: 1;
+  pointer-events: none; transform-origin: 50% 50%; will-change: transform; --a: 0;
+}
+.lg-lens > span { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: inherit; opacity: var(--a); }
+.lg-lens > .lg-lens-sh { box-shadow: var(--lg-hl-inset), var(--lg-hl-edge), var(--lg-hl-sh); }
+.lg-lens > .lg-lens-glass {
+  background: var(--lg-hl-tint); transition: background .2s ease;
+  -webkit-backdrop-filter: saturate(1.15); backdrop-filter: saturate(1.15);
+}
+.lg-lens > .lg-lens-glass::before {
+  content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: inherit; padding: 1.2px;
+  background: var(--lg-hl-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+/* 折射层：只在透镜停稳以后淡入。移动中透镜在变形，贴图跟不上，开着会在字上划出一道缝 */
+.lg-lens > .lg-lens-ref { display: none; opacity: 0; transition: opacity .08s linear; }
+html[data-lg-tier="l2"] .lg-lens > .lg-lens-ref, html[data-lg-tier="l3"] .lg-lens > .lg-lens-ref {
+  display: block; backdrop-filter: var(--lg-ref) saturate(1.2);
+}
+.lg-lens[data-settled] > .lg-lens-ref { opacity: var(--a); transition: opacity .24s ease .03s; }
+/* 跟手的光：按下时光圈放大（--p 是按下的程度） */
+.lg-lens > .lg-lens-light {
+  background: radial-gradient(calc(56px + 110px * var(--p, 0)) circle at var(--mx, 50%) var(--my, 50%), var(--lg-hl-glow), rgba(255, 255, 255, 0) 74%);
+}
+/* 落在选中项上：底色退到几乎透明，只剩高光环和跟手的光——不然白玻璃会把蓝色选中项洗白。
+   选中项是硬边的着色块，折射（最近邻取样）会把它折出锯齿，这时不开折射 */
+.lg-lens[data-onsel] > .lg-lens-glass { background: var(--lg-hl-onsel-tint); }
+.lg-lens[data-onsel] > .lg-lens-ref { display: none !important; }
+.lg-lens[data-onsel] > .lg-lens-sh { box-shadow: var(--lg-hl-edge), 0 8px 18px -9px rgba(15, 23, 42, .32); }
+.lg-lens[data-onsel] > .lg-lens-light {
+  background: radial-gradient(calc(64px + 110px * var(--p, 0)) circle at var(--mx, 50%) var(--my, 50%), rgba(255, 255, 255, .46), rgba(255, 255, 255, 0) 72%);
+}
+/* 整行形态（表格行一类）：只要一块垫底的亮板 */
+.lg-lens-under > .lg-lens-sh { box-shadow: var(--lg-hl-edge), 0 1px 1px rgba(15, 23, 42, .04), 0 4px 10px -6px rgba(15, 23, 42, .22); }
+.lg-lens-under > .lg-lens-glass { background: var(--lg-hl-under-tint); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.lg-lens-under[data-onsel] > .lg-lens-glass { background: var(--lg-hl-onsel-tint); }
+html[data-lg-tier="l0"] .lg-lens > .lg-lens-glass { background: var(--lg-hl-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-lg-tier="l0"] .lg-lens[data-onsel] > .lg-lens-glass { background: var(--lg-hl-onsel-tint); }
+
+/* 被透镜罩住的项压在透镜上面；放大、跟手由脚本写 transform。
+   自定义的项：写 .lg-item，或者脚本会给 data-lg-lens 面板里的项标上 data-lg-item */
+html[data-lg-lens] [data-lg-item], html[data-lg-lens] .lg-item,
+html[data-lg-lens] .lg-nav-item, html[data-lg-lens] .lg-nav-group, html[data-lg-lens] .lg-seg > button,
+html[data-lg-lens] .lg-menu-item, html[data-lg-lens] .lg-list-item, html[data-lg-lens] .lg-table-wrap tbody tr {
+  position: relative; z-index: 2; transform-origin: 50% 50%;
+}
+/* 没有脚本、或「关闭」档：悬停叠一层薄暗 */
+html:not([data-lg-lens]) .lg-item:hover, html:not([data-lg-lens]) .lg-nav-item:hover, html:not([data-lg-lens]) .lg-nav-group:hover,
+html:not([data-lg-lens]) .lg-seg > button:hover, html:not([data-lg-lens]) .lg-menu-item:hover, html:not([data-lg-lens]) .lg-list-item:hover,
+html:not([data-lg-lens]) .lg-icon-btn:hover, html:not([data-lg-lens]) .lg-pill-btn:hover, html:not([data-lg-lens]) .lg-table tbody tr:hover > td {
+  box-shadow: inset 0 0 0 999px var(--lg-hover);
+}
+
+/* 液态滑块：选中项底下那块，脚本按两条边各自的弹簧写位置 */
+.lg-thumb {
+  position: absolute; left: 0; top: 0; width: 0; height: 0; margin: 0 !important; z-index: 0;
+  pointer-events: none; transform-origin: 50% 50%; will-change: transform; opacity: 0;
+}
+.lg-thumb-seg { background: var(--lg-seg-thumb); box-shadow: var(--lg-seg-sh); }
+.lg-thumb-cursor { background: var(--lg-accent-glass); }
+/* 侧栏选中项：蓝色玻璃；危险项换红色——两层叠着，红的那层淡入（渐变没法直接过渡） */
+.lg-thumb-nav { background: linear-gradient(180deg, var(--lg-pro-top), var(--lg-pro-bot)); box-shadow: var(--lg-pro-sh); }
+.lg-thumb-nav::before {
+  content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: inherit;
+  background: linear-gradient(180deg, var(--lg-red-top), var(--lg-red-bot)); box-shadow: var(--lg-red-sh);
+  opacity: 0; transition: opacity .25s ease;
+}
+.lg-thumb-nav[data-danger]::before { opacity: 1; }
+.lg-thumb-nav::after {
+  content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: inherit;
+  background: radial-gradient(120% 90% at 20% -30%, rgba(255, 255, 255, .42), rgba(255, 255, 255, 0) 55%);
+}
+
+/* HDR 高光贴片：只在 l3 + HDR 屏出现，普通屏上一个像素都不画 */
+.lg-hdr { display: none; position: absolute; top: 0; height: 6px; margin: 0 !important; z-index: 4; pointer-events: none; }
+@media (dynamic-range: high) { html[data-lg-tier="l3"] .lg-hdr { display: block; } }
+
+/* ══ 17 三档：精简 / 关闭 ═══════════════════════════════════════════════
+ * 三档必须一眼分得出来——只去掉折射、只去掉透明的话，面板背后是纯色，看着和「完整」几乎一样，会被当成按钮没反应。
+ *   精简：面板实色（l0）；透镜与滑块直接到位、不放大、不跟手；弹出不做动画；按钮不浮起
+ *   关闭：再撤掉透镜、滑块、高光环、顶部柔光，悬停退回薄暗
+ */
+html[data-lg-mode="lite"] .lg-menu, html[data-lg-mode="lite"] .lg-panel, html[data-lg-mode="lite"] .lg-toast, html[data-lg-mode="lite"] .lg-tip,
+html[data-lg-mode="off"] .lg-menu, html[data-lg-mode="off"] .lg-panel, html[data-lg-mode="off"] .lg-toast { animation: none; }
+html[data-lg-mode="lite"] .lg-lens > .lg-lens-light { display: none; }
+html[data-lg-mode="lite"], html[data-lg-mode="off"] { --lg-lift: 0px; }
+html[data-lg-mode="off"] { --lg-rim: none; --lg-sheen: none; }
+
+/* ══ 18 无障碍、打印、老浏览器 ══════════════════════════════════════════ */
+
+.lg-btn:focus-visible, .lg-chip:focus-visible, .lg-nav-item:focus-visible, .lg-nav-group:focus-visible,
+.lg-seg > button:focus-visible, .lg-menu-item:focus-visible, .lg-list-item:focus-visible,
+.lg-icon-btn:focus-visible, .lg-pill-btn:focus-visible, .lg-item:focus-visible {
+  outline: 2px solid var(--lg-accent); outline-offset: 2px;
+}
+/* 系统要求减少透明度：玻璃换实色 */
+@media (prefers-reduced-transparency: reduce) {
+  .lg-glass::before { background: var(--lg-s, var(--lg-solid)); -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  .lg-lens > .lg-lens-glass { background: var(--lg-hl-solid); }
+  .lg-lens > .lg-lens-ref { display: none !important; }
+}
+/* 系统要求增强对比度：去掉半透明的高光环，换一圈实线 */
+@media (prefers-contrast: more) {
+  .lg-glass::after { display: none; }
+  .lg-glass { box-shadow: 0 0 0 1px var(--lg-line-strong), var(--lg-shadow-lo); }
+  .lg-glass::before { background: var(--lg-s, var(--lg-solid)); }
+}
+/* 系统要求减少动态效果：本套件的动画与过渡全关（透镜与滑块由脚本直接放到位） */
+@media (prefers-reduced-motion: reduce) {
+  [class*="lg-"], [class*="lg-"]::before, [class*="lg-"]::after { animation: none !important; transition: none !important; }
+}
+/* 窄屏：内容区收窄，页头胶囊只留要紧的字。侧栏请由页面在窄屏时设成 data-collapsed="true"（见 integration.md §7.6） */
+@media (max-width: 860px) {
+  .lg-main { padding: 14px 14px 32px; }
+  .lg-head .lg-chip-muted { display: none; }
+  .lg-head .lg-chip .lg-kbd { display: none; }
+}
+@media print {
+  .lg-lens, .lg-thumb, .lg-hdr, .lg-tip, .lg-toasts, .lg-scrim, .lg-menu { display: none !important; }
+  .lg-glass::before { background: #ffffff; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .lg-sidebar { display: none; }
+}
+/* IE11（\0screen 只有 IE 认）：没有 CSS 变量，至少保证可读、可点、不糊成一片 */
+@media screen\0 {
+  .lg-page { background: #e8ecf2; color: #17202a; }
+  .lg-glass, .lg-card, .lg-table-wrap { background: #ffffff; border: 1px solid #dfe4ea; }
+  .lg-btn { background: #ffffff; border: 1px solid #c3ccd6; color: #17202a; }
+  .lg-btn--primary { background: #2f6fe0; border-color: #2f6fe0; color: #ffffff; }
+  .lg-btn--danger { background: #a01c1c; border-color: #a01c1c; color: #ffffff; }
+  .lg-field { background: #ffffff; border: 1px solid #c3ccd6; color: #17202a; }
+  .lg-seg { background: #eef1f6; }
+  .lg-seg > button[aria-pressed="true"], .lg-seg > button[aria-selected="true"] { background: #2f6fe0; color: #ffffff; }
+  .lg-nav-plate { background: #f5f7fa; }
+  .lg-nav-item[aria-selected="true"] { background: #2f6fe0; color: #ffffff; }
+  .lg-nav-item--danger[aria-selected="true"] { background: #a01c1c; color: #ffffff; }
+  .lg-menu-item[aria-checked="true"], .lg-list-item.is-cursor { background: #eaf0fb; }
+  .lg-note { background: #f2f5f9; color: #5a6672; }
+  .lg-alert { background: #fce6e6; color: #a01c1c; }
+  .lg-table thead th { background: #f2f5f9; }
+}

@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liquid Glass UI · 演示</title>
+<link rel="stylesheet" href="../liquid-glass.css">
+<script>
+/*
+ * 主题与玻璃档位赶在样式生效前定下来，否则深色下会先闪一下浅色、玻璃会先闪一下别的样子。
+ * 玻璃这里只定个临时档：精简、关闭 = l0 实色；完整 / 自动先 l1 只模糊。
+ * liquid-glass.js 加载后再按浏览器与显卡升到 l2 / l3（折射、HDR 高光）。l1 所有浏览器都画得出来，从它升级看不出跳变。
+ */
+(function () {
+  var d = document.documentElement, t = null, g = null;
+  try { t = localStorage.getItem('lg.demo.theme'); g = localStorage.getItem('lg.glass'); } catch (e) {}
+  if (t !== 'light' && t !== 'dark' && t !== 'auto') { t = 'auto'; }
+  if (g !== 'full' && g !== 'lite' && g !== 'off') { g = 'auto'; }
+  d.setAttribute('data-theme', t);
+  d.setAttribute('data-lg-mode', g);
+  d.setAttribute('data-lg-tier', g === 'off' || g === 'lite' ? 'l0' : 'l1');
+})();
+</script>
+<style>
+  /* 演示页自己的版式（组件的样式全在 liquid-glass.css 里） */
+  .demo-cols { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .demo-cols > div > .lg-card + .lg-card { margin-top: 14px; }
+  @media (max-width: 1100px) { .demo-cols { grid-template-columns: minmax(0, 1fr); } }
+  .demo-section { margin-top: 14px; }
+  .demo-sub { font-size: 12.5px; color: var(--lg-ink-2); }
+  .demo-row { display: flex; align-items: center; flex-wrap: wrap; }
+  .demo-row > * + * { margin-left: 10px; }
+  .demo-row + .demo-row { margin-top: 12px; }
+  .demo-notes { margin-top: 14px; }
+  /* 折射演示：一块有内容的底，上面一颗能拖的玻璃。只在这一小块里放花纹——整页铺底纹是噪声 */
+  .demo-lab {
+    position: relative; height: 188px; overflow: hidden; border-radius: 14px; margin-top: 10px; user-select: none;
+    background: repeating-linear-gradient(90deg, rgba(47, 111, 224, .16) 0 14px, transparent 14px 28px),
+                linear-gradient(135deg, #f9d7c3, #cfe0fb 55%, #d9f2e3);
+  }
+  :root[data-theme="dark"] .demo-lab { background: repeating-linear-gradient(90deg, rgba(77, 142, 245, .22) 0 14px, transparent 14px 28px), linear-gradient(135deg, #3a2a23, #1d2a44 55%, #1b3326); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]):not([data-theme="dark"]) .demo-lab { background: repeating-linear-gradient(90deg, rgba(77, 142, 245, .22) 0 14px, transparent 14px 28px), linear-gradient(135deg, #3a2a23, #1d2a44 55%, #1b3326); }
+  }
+  .demo-lab-text { position: absolute; left: 18px; top: 16px; right: 18px; font-size: 26px; font-weight: 750; line-height: 1.25; color: rgba(23, 32, 42, .78); letter-spacing: -.01em; }
+  :root[data-theme="dark"] .demo-lab-text { color: rgba(230, 234, 240, .8); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]):not([data-theme="dark"]) .demo-lab-text { color: rgba(230, 234, 240, .8); } }
+  .demo-drop {
+    position: absolute; left: 0; top: 0; width: 220px; height: 84px; border-radius: 42px; cursor: grab; touch-action: none;
+    display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 650; color: var(--lg-ink);
+    box-shadow: var(--lg-edge), var(--lg-shadow); --lg-b: .6px; --lg-t: rgba(255, 255, 255, .1);
+  }
+  .demo-drop:active { cursor: grabbing; }
+  .demo-bottom-pad { height: 30px; }
+  .demo-login-logo {
+    width: 48px; height: 48px; border-radius: 15px; margin-bottom: 16px; color: #fff; font-size: 22px; font-weight: 750;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, var(--lg-pro-top), var(--lg-pro-bot));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -1px 0 rgba(0, 0, 0, .14), 0 8px 18px -8px var(--lg-pro-glow);
+  }
+  .lg-dialog h1 { margin: 0 0 4px; font-size: 21px; }
+  .lg-dialog .demo-sub { margin: 0 0 14px; }
+  .lg-dialog .lg-label { margin-top: 12px; }
+  .lg-dialog .lg-field { height: 42px; border-radius: 13px; padding: 0 14px; font-size: 14px; }
+  .lg-dialog .lg-btn { width: 100%; height: 44px; margin-top: 20px; font-size: 15px; }
+  .lg-dialog .lg-alert { margin-top: 12px; }
+  .demo-login-foot { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--lg-line); }
+</style>
+</head>
+<body class="lg-page">
+
+<!-- ══ 登录页（演示：随便填，点「登录」即进；口令留空会出一条红色报错） ══ -->
+<div id="login" class="lg-center" hidden>
+  <form class="lg-glass lg-dialog" id="login-form" autocomplete="off">
+    <div class="demo-login-logo" aria-hidden="true">L</div>
+    <h1>示例控制台</h1>
+    <p class="demo-sub">这是 Liquid Glass UI 的演示页，所有数据都是编的。</p>
+    <!-- 为什么回到这里（已退出、会话过期）：灰色说明，开始打字就收掉。输错口令才用下面的红色报错 -->
+    <p class="lg-note" data-kind="ok" id="login-note" role="status" hidden>已退出登录</p>
+    <label class="lg-label" for="login-user">账号</label>
+    <input class="lg-field" id="login-user" placeholder="随便填">
+    <label class="lg-label" for="login-pw">口令</label>
+    <input class="lg-field" id="login-pw" type="password" placeholder="随便填，留空看报错样式">
+    <button type="submit" class="lg-btn lg-btn--primary">登录</button>
+    <p class="lg-alert" id="login-error" role="alert" hidden>口令不对。演示页里随便填一个就能进。</p>
+    <div class="demo-login-foot"><p class="lg-hint">玻璃卡片背后是纯色：它和弹出层用同一种更实的玻璃，不折射。</p></div>
+  </form>
+</div>
+
+<div id="app" class="lg-shell">
+
+  <!-- ══ 侧栏 ══════════════════════════════════════════════════════════ -->
+  <aside class="lg-glass lg-sidebar" id="sidebar" data-collapsed="false">
+    <!-- data-lg-lens：自己的结构也能用透镜。值是项的选择器，data-lg-pad 外扩、data-lg-mag 放大量 -->
+    <div class="lg-brand" data-lg-lens=".lg-icon-btn" data-lg-pad="2" data-lg-mag="0.06">
+      <span class="lg-brand-mark" aria-hidden="true">L</span>
+      <span class="lg-brand-text">
+        <span class="lg-brand-name">示例控制台</span>
+        <span class="lg-brand-sub">Liquid Glass UI</span>
+      </span>
+      <span class="lg-grow"></span>
+      <button type="button" class="lg-icon-btn" id="sb-toggle" title="折叠菜单" aria-label="折叠菜单" aria-expanded="true">&#171;</button>
+    </div>
+
+    <div class="lg-nav" id="nav">
+      <button type="button" class="lg-nav-group" aria-expanded="true" aria-controls="grp-work">
+        <svg class="lg-nav-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        <span class="lg-nav-group-title">工作台</span>
+        <span class="lg-nav-group-count" aria-hidden="true">4</span>
+      </button>
+      <nav class="lg-nav-plate" id="grp-work" role="tablist" aria-label="工作台">
+        <button type="button" class="lg-nav-item" role="tab" aria-selected="true" data-key="1" title="概览">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/></svg></span>
+          <span class="lg-nav-label">概览</span><span class="lg-nav-key">1</span>
+        </button>
+        <button type="button" class="lg-nav-item" role="tab" aria-selected="false" data-key="2" title="搜索">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span>
+          <span class="lg-nav-label">搜索</span><span class="lg-nav-key">2</span>
+        </button>
+        <button type="button" class="lg-nav-item" role="tab" aria-selected="false" data-key="3" title="报表">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.4-6 4 12 2.4-6H21"/></svg></span>
+          <span class="lg-nav-label">报表</span><span class="lg-nav-key">3</span>
+        </button>
+        <button type="button" class="lg-nav-item" role="tab" aria-selected="false" data-key="4" title="运行日志">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5 9.5 12 5 16.5"/><path d="M12 17h7"/></svg></span>
+          <span class="lg-nav-label">运行日志</span><span class="lg-nav-key">4</span>
+        </button>
+      </nav>
+
+      <button type="button" class="lg-nav-group" aria-expanded="true" aria-controls="grp-data">
+        <svg class="lg-nav-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        <span class="lg-nav-group-title">数据</span>
+        <span class="lg-nav-group-count" aria-hidden="true">2</span>
+      </button>
+      <nav class="lg-nav-plate" id="grp-data" role="tablist" aria-label="数据">
+        <button type="button" class="lg-nav-item" role="tab" aria-selected="false" data-key="5" title="数据表">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg></span>
+          <span class="lg-nav-label">数据表</span><span class="lg-nav-key">5</span>
+        </button>
+        <button type="button" class="lg-nav-item" role="tab" aria-selected="false" data-key="6" title="导入与导出">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8"/><path d="M9 8.4 12 11.4 15 8.4"/><path d="M4 13l8 4 8-4"/><path d="M4 18l8 3 8-3"/></svg></span>
+          <span class="lg-nav-label">导入与导出</span><span class="lg-nav-key">6</span>
+        </button>
+      </nav>
+
+      <!-- 危险组：缺省收起，箭头是红的；底板带一点红，选中时滑块换成红色 -->
+      <button type="button" class="lg-nav-group lg-nav-group--danger" aria-expanded="false" aria-controls="grp-danger">
+        <svg class="lg-nav-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        <span class="lg-nav-group-title">危险操作</span>
+        <span class="lg-nav-group-badge">危险</span>
+        <span class="lg-nav-group-count" aria-hidden="true">2</span>
+      </button>
+      <nav class="lg-nav-plate lg-nav-plate--danger" id="grp-danger" role="tablist" aria-label="危险操作" hidden>
+        <button type="button" class="lg-nav-item lg-nav-item--danger" role="tab" aria-selected="false" title="批量删除（危险）">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V4.5h5V7"/><path d="M6.5 7l1 12.5h9l1-12.5"/><path d="M10.2 11v5.2"/><path d="M13.8 11v5.2"/></svg></span>
+          <span class="lg-nav-label">批量删除</span>
+        </button>
+        <button type="button" class="lg-nav-item lg-nav-item--danger" role="tab" aria-selected="false" title="重置数据（危险）">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4h4"/></svg></span>
+          <span class="lg-nav-label">重置数据</span>
+        </button>
+      </nav>
+
+      <button type="button" class="lg-nav-group" aria-expanded="true" aria-controls="grp-sys">
+        <svg class="lg-nav-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        <span class="lg-nav-group-title">系统</span>
+        <span class="lg-nav-group-count" aria-hidden="true">2</span>
+      </button>
+      <nav class="lg-nav-plate" id="grp-sys" role="tablist" aria-label="系统">
+        <button type="button" class="lg-nav-item" role="tab" aria-selected="false" title="成员与权限">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3.2 3-5 5.5-5s4.7 1.8 5.5 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6"/><path d="M17.5 14.2c1.6.6 2.6 2.2 3 4.8"/></svg></span>
+          <span class="lg-nav-label">成员与权限</span>
+        </button>
+        <button type="button" class="lg-nav-item" role="tab" aria-selected="false" title="设置">
+          <span class="lg-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h9"/><path d="M18 7.5h2"/><circle cx="15.5" cy="7.5" r="2"/><path d="M4 16.5h4"/><path d="M12.5 16.5H20"/><circle cx="10.2" cy="16.5" r="2"/></svg></span>
+          <span class="lg-nav-label">设置</span>
+        </button>
+      </nav>
+    </div>
+
+    <span class="lg-grow"></span>
+    <div class="lg-sidebar-foot">
+      <div class="lg-row">
+        <span class="lg-row-label">主题</span>
+        <div class="lg-seg lg-seg--sm lg-seg--block" role="group" aria-label="主题">
+          <button type="button" data-theme-set="light" aria-pressed="false">浅</button>
+          <button type="button" data-theme-set="dark" aria-pressed="false">深</button>
+          <button type="button" data-theme-set="auto" aria-pressed="true">跟随</button>
+        </div>
+      </div>
+      <!-- 三档开关：data-lg-mode-set 的按钮由脚本接管；data-lg-mode-switch 上的提示写着现在实际是哪一档、为什么 -->
+      <div class="lg-row lg-mode-row">
+        <span class="lg-row-label">玻璃</span>
+        <div class="lg-seg lg-seg--sm lg-seg--block" role="group" aria-label="玻璃效果" data-lg-mode-switch>
+          <button type="button" data-lg-mode-set="full" aria-pressed="true">完整</button>
+          <button type="button" data-lg-mode-set="lite" aria-pressed="false">精简</button>
+          <button type="button" data-lg-mode-set="off" aria-pressed="false">关闭</button>
+        </div>
+      </div>
+      <div class="lg-account" data-lg-lens=".lg-pill-btn" data-lg-pad="2" data-lg-mag="0.05">
+        <span class="lg-account-name">访客</span>
+        <button type="button" class="lg-pill-btn" id="logout">退出</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══ 内容区 ════════════════════════════════════════════════════════ -->
+  <div class="lg-main">
+    <header class="lg-head">
+      <h1 id="page-title">概览</h1>
+      <span class="demo-sub" id="page-sub">侧栏、按钮、表单、表格都在这一页</span>
+      <span class="lg-grow"></span>
+      <!-- 同一排的两颗玻璃胶囊：都是 .lg-glass.lg-chip，颜色、透明度才一样 -->
+      <button type="button" class="lg-glass lg-chip" id="ws-chip" aria-haspopup="true" aria-expanded="false" aria-controls="ws-menu" title="切换工作区">
+        <span class="lg-dot" aria-hidden="true"></span>
+        <span class="lg-chip-muted">工作区</span><span class="lg-chip-strong" id="ws-name">演示</span>
+        <span class="lg-chip-caret" aria-hidden="true">&#9662;</span>
+      </button>
+      <button type="button" class="lg-glass lg-chip" id="cmd-open">
+        <svg class="lg-chip-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <span class="lg-chip-muted">搜索页面与命令</span><kbd class="lg-kbd">Ctrl K</kbd>
+      </button>
+    </header>
+
+    <main id="main">
+      <div class="demo-cols">
+        <div>
+          <section class="lg-card">
+            <h2 class="lg-card-title">表单与按钮</h2>
+            <div class="lg-form-grid">
+              <div><label class="lg-label" for="f-name">名称</label><input class="lg-field" id="f-name" placeholder="例如：每日汇总"></div>
+              <div><label class="lg-label" for="f-kind">类型</label>
+                <select class="lg-field" id="f-kind"><option>定时任务</option><option>手动任务</option><option>事件触发</option></select></div>
+              <div><label class="lg-label" for="f-owner">负责人</label><input class="lg-field" id="f-owner" placeholder="谁来跟进"></div>
+            </div>
+            <div class="demo-section"><label class="lg-label" for="f-note">备注</label>
+              <textarea class="lg-field" id="f-note" rows="3" placeholder="写点什么"></textarea></div>
+            <div class="lg-actions">
+              <button type="button" class="lg-btn lg-btn--primary" id="btn-save">保存 <kbd class="lg-kbd">Ctrl+Enter</kbd></button>
+              <button type="button" class="lg-btn" id="btn-sample">填个示例</button>
+              <button type="button" class="lg-btn" id="btn-clear">清空</button>
+              <span class="lg-grow"></span>
+              <button type="button" class="lg-btn lg-btn--danger" id="btn-delete">删除</button>
+            </div>
+          </section>
+
+          <section class="lg-card">
+            <h2 class="lg-card-title">折射演示</h2>
+            <p class="lg-hint">把玻璃拖到字上。Chrome / Edge 的「完整」档下，玻璃边缘会把背后的字和条纹往里弯；其他浏览器只模糊。
+              花纹只放在这一小块里——整页铺底纹是噪声。</p>
+            <div class="demo-lab" id="lab">
+              <div class="demo-lab-text">Liquid Glass 把光往中间收<br>边缘像一块有厚度的凸透镜</div>
+              <div class="lg-glass demo-drop" id="drop" data-lg-refract="22 20 10" role="img" aria-label="一块可以拖动的玻璃"></div>
+            </div>
+          </section>
+        </div>
+
+        <div>
+          <section class="lg-card">
+            <h2 class="lg-card-title">分段开关</h2>
+            <div class="demo-row">
+              <div class="lg-seg" role="group" aria-label="时间范围">
+                <button type="button" aria-pressed="true">今天</button>
+                <button type="button" aria-pressed="false">本周</button>
+                <button type="button" aria-pressed="false">本月</button>
+                <button type="button" aria-pressed="false">全年</button>
+              </div>
+            </div>
+            <div class="demo-row">
+              <div class="lg-seg lg-seg--sm" role="group" aria-label="显示方式">
+                <button type="button" aria-pressed="true">列表</button>
+                <button type="button" aria-pressed="false">卡片</button>
+                <button type="button" aria-pressed="false">时间线</button>
+              </div>
+              <span class="demo-sub">选中项底下那块白玻璃会「流」过去</span>
+            </div>
+          </section>
+
+          <section class="lg-card">
+            <h2 class="lg-card-title">说明、报错与浮动提示</h2>
+            <p class="lg-note" data-kind="ok">已退出登录——自己点的退出是说明，不是报错，用灰色</p>
+            <p class="lg-note" data-kind="info">会话已过期，请重新登录</p>
+            <p class="lg-alert">口令不对：真出错才用红色</p>
+            <div class="lg-actions">
+              <button type="button" class="lg-btn lg-btn--sm" id="toast-good">成功提示</button>
+              <button type="button" class="lg-btn lg-btn--sm" id="toast-bad">失败提示</button>
+              <button type="button" class="lg-btn lg-btn--sm" id="toast-plain">普通提示</button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="lg-glass lg-toolbar demo-section">
+        <div class="lg-seg lg-seg--sm" role="group" aria-label="按状态筛选" id="filter">
+          <button type="button" aria-pressed="true" data-filter="">全部</button>
+          <button type="button" aria-pressed="false" data-filter="good">完成</button>
+          <button type="button" aria-pressed="false" data-filter="warn">进行中</button>
+          <button type="button" aria-pressed="false" data-filter="bad">失败</button>
+        </div>
+        <span class="lg-count" id="row-count"></span>
+        <span class="lg-grow"></span>
+        <button type="button" class="lg-btn lg-btn--sm">导出</button>
+      </div>
+      <div class="lg-table-wrap demo-section">
+        <table class="lg-table">
+          <thead><tr><th>编号</th><th>任务</th><th>状态</th><th class="lg-num">耗时（秒）</th><th class="lg-num">处理条数</th><th>更新于</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="demo-bottom-pad"></div>
+
+      <!-- 粘在底部的保存条：表单与表格从它底下滚过，所以它默认折射 -->
+      <div class="lg-glass lg-toolbar lg-toolbar--sticky">
+        <span class="demo-sub">有 2 处修改还没保存</span>
+        <span class="lg-grow"></span>
+        <button type="button" class="lg-btn lg-btn--sm" id="discard">放弃</button>
+        <button type="button" class="lg-btn lg-btn--primary lg-btn--sm" id="commit">保存修改</button>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- 工作区菜单（弹出层） -->
+<div class="lg-glass lg-menu" id="ws-menu" role="menu" aria-label="切换工作区" hidden>
+  <div class="lg-menu-title">切换工作区</div>
+  <button type="button" class="lg-menu-item" role="menuitemradio" aria-checked="true" data-ws="演示">
+    <span class="lg-radio" aria-hidden="true"></span><span><b>演示</b><span class="lg-menu-sub">本地的示例数据</span></span>
+  </button>
+  <button type="button" class="lg-menu-item" role="menuitemradio" aria-checked="false" data-ws="测试">
+    <span class="lg-radio" aria-hidden="true"></span><span><b>测试</b><span class="lg-menu-sub">给测试用的一套，可以随便改</span></span>
+  </button>
+  <button type="button" class="lg-menu-item" role="menuitemradio" aria-checked="false" disabled>
+    <span class="lg-radio" aria-hidden="true"></span><span><b>归档</b><span class="lg-menu-sub">只读，暂时不可切换</span></span>
+  </button>
+  <div class="lg-menu-sep"></div>
+  <button type="button" class="lg-menu-item" id="ws-manage"><span>管理工作区…</span></button>
+</div>
+
+<!-- 命令面板 -->
+<div class="lg-scrim" id="cmd" hidden>
+  <div class="lg-glass lg-panel" role="dialog" aria-label="搜索页面与命令">
+    <input class="lg-panel-input" id="cmd-input" placeholder="搜索页面与命令……" autocomplete="off" spellcheck="false">
+    <div class="lg-list" id="cmd-list" role="listbox"></div>
+    <div class="lg-panel-foot">↑↓ 选择 · Enter 打开 · Esc 关闭</div>
+  </div>
+</div>
+
+<!--
+  可选的全局配置：必须写在 liquid-glass.js 之前。这里只示范两项——
+  存储键（同一个域名下有多个应用时分开记），以及沿用页面语言的提示文案。
+-->
+<script>window.LiquidGlassConfig = { storageKey: 'lg.glass' };</script>
+<script src="../liquid-glass.js"></script>
+<script>
+/* 演示页自己的交互（ES5）。注意它和 liquid-glass.js 的分工：这里只改 aria-* / hidden / data-* 与内容，
+   液态滑块、透镜会自己跟过去——不需要通知它。 */
+(function () {
+  'use strict';
+  var doc = document, root = doc.documentElement;
+  function $(s, r) { return (r || doc).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || doc).querySelectorAll(s)); }
+  function on(el, ev, fn) { if (el) { el.addEventListener(ev, fn); } }
+  function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  /* 主题 */
+  function syncTheme() {
+    var t = root.getAttribute('data-theme');
+    $$('[data-theme-set]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-theme-set') === t)); });
+  }
+  $$('[data-theme-set]').forEach(function (b) {
+    on(b, 'click', function () { root.setAttribute('data-theme', b.getAttribute('data-theme-set')); store('lg.demo.theme', b.getAttribute('data-theme-set')); syncTheme(); });
+  });
+  syncTheme();
+
+  /* 侧栏：选页、分组收起、折叠成图标轨 */
+  var items = $$('.lg-nav-item');
+  function select(it) {
+    items.forEach(function (x) { x.setAttribute('aria-selected', String(x === it)); });
+    var plate = it.parentNode, grp = $('[aria-controls="' + plate.id + '"]');
+    if (plate.hidden) { plate.hidden = false; grp.setAttribute('aria-expanded', 'true'); }
+    $('#page-title').textContent = $('.lg-nav-label', it).textContent;
+    markGroups();
+  }
+  function markGroups() {
+    $$('.lg-nav-group').forEach(function (g) {
+      var plate = doc.getElementById(g.getAttribute('aria-controls'));
+      var has = plate.hidden && !!$('[aria-selected="true"]', plate);
+      if (has) { g.setAttribute('data-has-active', ''); } else { g.removeAttribute('data-has-active'); }
+    });
+  }
+  items.forEach(function (it) { on(it, 'click', function () { select(it); }); });
+  $$('.lg-nav-group').forEach(function (g) {
+    on(g, 'click', function () {
+      var plate = doc.getElementById(g.getAttribute('aria-controls')), open = plate.hidden;
+      plate.hidden = !open; g.setAttribute('aria-expanded', String(open));
+      markGroups();
+    });
+  });
+  function collapse(col) {
+    var sb = $('#sidebar'), b = $('#sb-toggle');
+    sb.setAttribute('data-collapsed', String(col));
+    b.innerHTML = col ? '&#187;' : '&#171;';
+    b.setAttribute('aria-expanded', String(!col));
+    b.setAttribute('title', col ? '展开菜单' : '折叠菜单'); b.setAttribute('aria-label', col ? '展开菜单' : '折叠菜单');
+  }
+  on($('#sb-toggle'), 'click', function () { collapse($('#sidebar').getAttribute('data-collapsed') !== 'true'); });
+  // 窄屏（< 860px）自动折叠成图标轨，变宽了再展开
+  var narrow = window.matchMedia ? window.matchMedia('(max-width: 860px)') : null;
+  if (narrow) {
+    if (narrow.matches) { collapse(true); }
+    var onNarrow = function (e) { collapse(e.matches); };
+    if (narrow.addEventListener) { narrow.addEventListener('change', onNarrow); } else if (narrow.addListener) { narrow.addListener(onNarrow); }
+  }
+
+  /* 分段开关（所有 .lg-seg 里不归别人管的按钮）：只改 aria-pressed */
+  $$('.lg-seg').forEach(function (seg) {
+    if (seg.hasAttribute('data-lg-mode-switch') || $('[data-theme-set]', seg)) { return; }
+    $$('button', seg).forEach(function (b) {
+      on(b, 'click', function () {
+        $$('button', seg).forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+        if (seg.id === 'filter') { renderRows(b.getAttribute('data-filter')); }
+      });
+    });
+  });
+
+  /* 表格：编的数据 */
+  var DATA = [
+    ['T-1001', '每日汇总', 'good', 12.4, 18240, '09:12'], ['T-1002', '数据同步', 'good', 48.1, 96512, '09:20'],
+    ['T-1003', '报表生成', 'warn', 3.2, 1204, '09:31'],    ['T-1004', '索引重建', 'bad', 61.9, 0, '09:44'],
+    ['T-1005', '数据校验', 'good', 7.7, 5120, '10:02'],    ['T-1006', '日志归档', 'good', 22.0, 44310, '10:15'],
+    ['T-1007', '备份校验', 'warn', 15.3, 8800, '10:27'],   ['T-1008', '权限巡检', 'good', 1.9, 312, '10:40'],
+    ['T-1009', '清理临时文件', 'bad', 0.4, 0, '10:52'],   ['T-1010', '邮件通知', 'good', 0.8, 64, '11:05']
+  ];
+  var LABEL = { good: '完成', warn: '进行中', bad: '失败' };
+  function renderRows(f) {
+    var html = '', n = 0;
+    DATA.forEach(function (r) {
+      if (f && r[2] !== f) { return; }
+      n++;
+      html += '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td><td><span class="lg-badge lg-badge--' + r[2] + '">' + LABEL[r[2]]
+        + '</span></td><td class="lg-num">' + r[3].toFixed(1) + '</td><td class="lg-num">' + r[4].toLocaleString('zh-CN') + '</td><td>' + r[5] + '</td></tr>';
+    });
+    $('#rows').innerHTML = html;          // 整片重画：透镜会自己发现并跟上
+    $('#row-count').textContent = '共 ' + n + ' 条';
+  }
+  renderRows('');
+
+  /* 浮动提示 */
+  function toast(text, kind) {
+    var box = $('.lg-toasts');
+    if (!box) { box = doc.createElement('div'); box.className = 'lg-toasts'; box.setAttribute('aria-live', 'polite'); doc.body.appendChild(box); }
+    var el = doc.createElement('div');
+    el.className = 'lg-glass lg-toast' + (kind ? ' lg-toast--' + kind : '');
+    el.setAttribute('role', 'status');
+    el.textContent = text;
+    box.appendChild(el);
+    setTimeout(function () { if (el.parentNode) { el.parentNode.removeChild(el); } }, 3200);
+  }
+  on($('#toast-good'), 'click', function () { toast('已保存', 'good'); });
+  on($('#toast-bad'), 'click', function () { toast('保存失败：网络断开了', 'bad'); });
+  on($('#toast-plain'), 'click', function () { toast('这是一条普通提示'); });
+  on($('#btn-save'), 'click', function () { toast('已保存（演示）', 'good'); });
+  on($('#commit'), 'click', function () { toast('修改已保存（演示）', 'good'); });
+  on($('#discard'), 'click', function () { toast('已放弃修改（演示）'); });
+  on($('#btn-delete'), 'click', function () { toast('演示页不会真的删除任何东西', 'bad'); });
+  on($('#btn-sample'), 'click', function () {
+    $('#f-name').value = '每日汇总'; $('#f-owner').value = '值班同学'; $('#f-note').value = '每天 9 点跑一次，失败重试两次。';
+  });
+  on($('#btn-clear'), 'click', function () { $('#f-name').value = ''; $('#f-owner').value = ''; $('#f-note').value = ''; });
+
+  /* 工作区菜单：贴在角标下面，右对齐 */
+  var chip = $('#ws-chip'), menu = $('#ws-menu');
+  function menuOpen(open) {
+    menu.hidden = !open; chip.setAttribute('aria-expanded', String(open));
+    if (!open) { return; }
+    var r = chip.getBoundingClientRect();
+    menu.style.top = (r.bottom + 8) + 'px';
+    menu.style.left = Math.max(12, r.right - menu.offsetWidth) + 'px';
+  }
+  on(chip, 'click', function (e) { e.stopPropagation(); menuOpen(menu.hidden); });
+  $$('.lg-menu-item[data-ws]', menu).forEach(function (it) {
+    on(it, 'click', function () {
+      $$('.lg-menu-item[data-ws]', menu).forEach(function (x) { x.setAttribute('aria-checked', String(x === it)); });
+      $('#ws-name').textContent = it.getAttribute('data-ws');
+      menuOpen(false);
+      toast('已切换到「' + it.getAttribute('data-ws') + '」工作区', 'good');
+    });
+  });
+  on($('#ws-manage'), 'click', function () { menuOpen(false); toast('演示页没有这一页'); });
+  on(doc, 'click', function (e) { if (!menu.hidden && !menu.contains(e.target)) { menuOpen(false); } });
+  on(window, 'resize', function () { if (!menu.hidden) { menuOpen(true); } });
+
+  /* 命令面板：Ctrl/⌘+K 打开；每按一次方向键整片重画列表（光标滑块照样连续地滑） */
+  var cmd = $('#cmd'), input = $('#cmd-input'), list = $('#cmd-list'), cursor = 0, hits = [];
+  var COMMANDS = items.map(function (it) {
+    return { label: $('.lg-nav-label', it).textContent, kind: '页面', run: function () { select(it); } };
+  }).concat([
+    { label: '切换到深色', kind: '命令', run: function () { root.setAttribute('data-theme', 'dark'); store('lg.demo.theme', 'dark'); syncTheme(); } },
+    { label: '切换到浅色', kind: '命令', run: function () { root.setAttribute('data-theme', 'light'); store('lg.demo.theme', 'light'); syncTheme(); } },
+    { label: '玻璃效果：精简', kind: '命令', run: function () { window.LiquidGlass && window.LiquidGlass.setMode('lite', true); } },
+    { label: '玻璃效果：完整', kind: '命令', run: function () { window.LiquidGlass && window.LiquidGlass.setMode('full', true); } }
+  ]);
+  function renderCmd() {
+    var q = input.value.trim().toLowerCase();
+    hits = COMMANDS.filter(function (c) { return !q || c.label.toLowerCase().indexOf(q) >= 0; });
+    cursor = Math.max(0, Math.min(cursor, hits.length - 1));
+    list.innerHTML = hits.length ? hits.map(function (c, i) {
+      return '<button type="button" class="lg-list-item' + (i === cursor ? ' is-cursor' : '') + '" role="option" aria-selected="' + (i === cursor) + '" data-i="' + i + '">'
+        + '<span>' + c.label + '</span><span class="lg-list-meta">' + c.kind + '</span></button>';
+    }).join('') : '<div class="lg-list-empty">没有找到</div>';
+  }
+  function cmdOpen(open) {
+    cmd.hidden = !open;
+    if (open) { input.value = ''; cursor = 0; renderCmd(); input.focus(); }
+  }
+  function run(i) { var c = hits[i]; cmdOpen(false); if (c) { c.run(); } }
+  on($('#cmd-open'), 'click', function () { cmdOpen(true); });
+  on(input, 'input', function () { cursor = 0; renderCmd(); });
+  on(list, 'click', function (e) { var b = e.target.closest('[data-i]'); if (b) { run(+b.getAttribute('data-i')); } });
+  on(cmd, 'click', function (e) { if (e.target === cmd) { cmdOpen(false); } });
+  on(doc, 'keydown', function (e) {
+    var typing = /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '');
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); cmdOpen(cmd.hidden); return; }
+    if (!cmd.hidden) {
+      if (e.key === 'Escape') { cmdOpen(false); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); cursor = (cursor + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % Math.max(1, hits.length); renderCmd(); }
+      else if (e.key === 'Enter') { e.preventDefault(); run(cursor); }
+      return;
+    }
+    if (e.key === 'Escape' && !menu.hidden) { menuOpen(false); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { toast('已保存（演示）', 'good'); return; }
+    if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && /^[1-6]$/.test(e.key)) {
+      var it = $('.lg-nav-item[data-key="' + e.key + '"]');
+      if (it) { select(it); }
+    }
+  });
+
+  /* 折射演示：拖动玻璃（只改 transform，折射贴图只和尺寸有关，拖动不用重算） */
+  var drop = $('#drop'), lab = $('#lab'), pos = { x: 36, y: 70 }, drag = null;
+  function place() {
+    pos.x = Math.max(0, Math.min(pos.x, lab.clientWidth - drop.offsetWidth));
+    pos.y = Math.max(0, Math.min(pos.y, lab.clientHeight - drop.offsetHeight));
+    drop.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
+  }
+  on(drop, 'pointerdown', function (e) { drag = { x: e.clientX - pos.x, y: e.clientY - pos.y }; if (drop.setPointerCapture) { drop.setPointerCapture(e.pointerId); } });
+  on(drop, 'pointermove', function (e) { if (drag) { pos.x = e.clientX - drag.x; pos.y = e.clientY - drag.y; place(); } });
+  on(drop, 'pointerup', function () { drag = null; });
+  on(window, 'resize', place);
+  place();
+
+  /* 登录页 */
+  on($('#logout'), 'click', function () {
+    $('#app').hidden = true; $('#login').hidden = false;
+    $('#login-note').hidden = false; $('#login-error').hidden = true;
+    $('#login-user').focus();
+  });
+  on($('#login-form'), 'input', function () { $('#login-note').hidden = true; });
+  on($('#login-form'), 'submit', function (e) {
+    e.preventDefault();
+    if (!$('#login-pw').value) { $('#login-error').hidden = false; $('#login-note').hidden = true; return; }
+    $('#login').hidden = true; $('#app').hidden = false; $('#login-pw').value = '';
+  });
+  // 截图脚本用：?view=login 直接看登录页
+  if (/[?&]view=login\b/.test(location.search)) { $('#logout').click(); }
+})();
+</script>
+</body>
+</html>
