@@ -382,4 +382,4 @@ if (failures.length) {
   console.error('\n失败 ' + failures.length + ' 项：\n- ' + failures.join('\n- '));
   process.exit(1);
 }
-console.log(checkOnly ? '\n三档校验通过' : `\n完成，截图在 ${outDir}`);
+console.log(checkOnly ? '\n校验通过' : `\n完成，截图在 ${outDir}`);
