@@ -1,11 +1,12 @@
-# 检查 → 打包 .skill →（打了版本标签时）发布到 Releases。
+# 检查 → 打包 .skill →（有新版本时）发布到 Releases。
 #
-#   推到 main / 提 PR：只检查、打包，包作为运行产物（Artifacts）留下，不发布
-#   推 vX.Y.Z 标签：检查、打包，并在 Releases 页面建这个版本、挂上 .skill 与校验和
-#   手动运行（Actions 页面 → Run workflow）：填了标签就发布那个版本，不填只打包
+#   推到 main：检查、打包；liquid-glass.js 里的 version 若还没有对应的 Release（vX.Y.Z），
+#             就自动建标签与 Release、挂上 .skill 与校验和；已经发过的版本不动
+#   提 PR：只检查、打包，包作为运行产物（Artifacts）留下
+#   推 vX.Y.Z 标签 / 手动运行（Actions 页面 → Run workflow，填标签）：发布那个版本
 #
-# 发布新版本：先把 liquid-glass.js 里的 version（以及 CSS / JS 文件头的版本号）改成新版本并提交，
-# 再推 vX.Y.Z 标签。标签与脚本里的版本对不上时打包会失败，不会发出一个版本号错的包。
+# 发布新版本：把 liquid-glass.js 里的 version（以及 CSS / JS 文件头的版本号）改成新版本，推到 main 即可。
+# 标签与脚本里的版本对不上时打包会失败，不会发出一个版本号错的包。
 name: 打包 .skill
 
 on:
@@ -46,10 +47,17 @@ jobs:
         id: ver
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TAG=""
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; fi
           if [ -n "${INPUT_TAG}" ]; then TAG="${INPUT_TAG}"; fi
+          # 推到 main：脚本里的版本还没发布过，就发布它
+          if [ -z "${TAG}" ] && [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            V="$(sed -n "s/.*version: '\([^']*\)'.*/\1/p" liquid-glass-ui/assets/liquid-glass.js | head -n 1)"
+            if [ -n "${V}" ] && ! gh release view "v${V}" >/dev/null 2>&1; then TAG="v${V}"; echo "v${V} 还没有发布过，这次发布"; fi
+          fi
           if [ -n "${TAG}" ] && ! printf '%s' "${TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.]+)?$'; then
             echo "::error::标签要写成 vX.Y.Z，现在是：${TAG}"; exit 1
           fi
@@ -94,6 +102,7 @@ jobs:
         if: steps.ver.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.ver.outputs.tag }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |

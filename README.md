@@ -128,11 +128,13 @@ python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liqui
 
 ## 发布新版本
 
-1. 把 `liquid-glass-ui/assets/liquid-glass.js` 里的 `version: '…'`，以及 CSS / JS 文件头的版本号，改成新版本（比如 `1.0.1`），提交推到 `main`。
-2. 推一个同名标签：`git tag v1.0.1 && git push origin v1.0.1`。
-   （或者在 Actions 页面手动运行「打包 .skill」，填上标签。）
-3. 工作流检查通过后自动在 Releases 页面建好这个版本，挂上 `liquid-glass-ui.skill` 和它的校验和。
-   标签和脚本里的版本号对不上时打包会失败，不会发出一个版本号错的包。
+1. 把 `liquid-glass-ui/assets/liquid-glass.js` 里的 `version: '…'`，以及 CSS / JS 文件头的版本号，改成新版本（比如 `1.0.1`）。
+2. 提交、推到 `main`。
+3. 工作流检查通过后，发现 `v1.0.1` 还没有发布过，就自动建好标签和 Release，挂上 `liquid-glass-ui.skill` 与校验和。
+   已经发布过的版本不会被覆盖；检查没过就不发布。
+
+也可以推一个 `vX.Y.Z` 标签，或在 Actions 页面手动运行「打包 .skill」并填上标签来发布。
+标签和脚本里的版本号对不上时打包会失败，不会发出一个版本号错的包。
 
 本地打包：`python3 tools/package_skill.py liquid-glass-ui dist`。
 
