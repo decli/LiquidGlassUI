@@ -65,7 +65,8 @@ description: >-
 ```bash
 node scripts/check.mjs [你的.css 你的.js 你的页面.html]   # 不给参数就查套件自己
 node scripts/shoot.mjs --url http://localhost:8080/ [--key 你的档位存储键] [--hover '悬停哪一项']
-# 浅 / 深 × 三档 6 张全屏 + 三档校验；不给 --url 就拍演示页的整套截图
+# 浅 / 深 × 三档 6 张全屏 + 三档校验；不给 --url 就拍演示页的整套截图，
+# 并逐个悬停演示页里每一个能点的元素（都要有反馈）、核对所有玻璃是同一种材质
 ```
 
 然后按 integration.md §11 的清单真机过一遍（设备像素比 1 和 2、快速划过菜单、跨很远换选中、打开弹出层、系统无障碍设置）。

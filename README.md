@@ -62,6 +62,14 @@ python3 -m http.server -d liquid-glass-ui/assets 8000
 
 ## 作为 Claude skill 用
 
+**下载安装包**：[Releases 页面](https://github.com/decli/LiquidGlassUI/releases/latest) 里的 `liquid-glass-ui.skill`
+（直链：<https://github.com/decli/LiquidGlassUI/releases/latest/download/liquid-glass-ui.skill>）。它是一个 zip，里面就是 `liquid-glass-ui/` 文件夹。
+
+- **Claude Code**：`unzip liquid-glass-ui.skill -d ~/.claude/skills/`（只给某一个项目用，就解到 `项目/.claude/skills/`）
+- **claude.ai / Claude 桌面版**：在技能设置里上传这个 `.skill` 文件
+
+也可以直接从仓库拷：
+
 ```bash
 git clone https://github.com/decli/LiquidGlassUI.git
 cp -r LiquidGlassUI/liquid-glass-ui ~/.claude/skills/              # 所有项目都能用
@@ -69,8 +77,7 @@ cp -r LiquidGlassUI/liquid-glass-ui ~/.claude/skills/              # 所有项�
 cp -r LiquidGlassUI/liquid-glass-ui 你的项目/.claude/skills/
 ```
 
-之后在 Claude Code 里说「把这个管理页改成液态玻璃风格」「做一个苹果风的侧栏」「加个毛玻璃效果」之类的话，它会自动用上这个 skill。
-在 claude.ai 上用：把 `liquid-glass-ui` 文件夹打成 zip，在技能设置里上传。
+之后在 Claude 里说「把这个管理页改成液态玻璃风格」「做一个苹果风的侧栏」「加个毛玻璃效果」之类的话，它会自动用上这个 skill。
 
 ## 目录
 
@@ -93,6 +100,8 @@ liquid-glass-ui/                 ← skill 本体（整个文件夹拷走即可�
     ├── displacement_map.py      位移贴图 / 静态 SVG 滤镜生成器
     └── hdr_png.py               HDR 高光贴片生成器
 design/                          定稿截图（由 scripts/shoot.mjs 拍的）
+tools/package_skill.py           把 liquid-glass-ui/ 打成 .skill（与官方 skill-creator 同格式，可复现）
+.github/workflows/skill.yml      检查 → 打包 →（推版本标签时）发布到 Releases
 ```
 
 ## 浏览器
@@ -108,12 +117,24 @@ design/                          定稿截图（由 scripts/shoot.mjs 拍的）
 
 ```bash
 node liquid-glass-ui/scripts/check.mjs         # ES5、不改 class、令牌一致、类名没拼错
-node liquid-glass-ui/scripts/shoot.mjs         # 拍演示页整套截图，并验三档在 DOM 和像素上都分得开（需要 Playwright）
+node liquid-glass-ui/scripts/shoot.mjs         # 拍演示页整套截图，并验：三档分得开、每个能点的元素悬停都有反馈、所有玻璃同一种材质（需要 Playwright）
 python3 liquid-glass-ui/scripts/displacement_map.py --selftest
 python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liquid-glass.js
 ```
 
 更多截图与说明见 [design/](design/README.md)。
+
+每次推到 `main` 或提 PR，GitHub Actions 都会跑一遍上面这些检查（包括真浏览器的三档校验）并打出 `.skill`，留在那次运行的产物里。
+
+## 发布新版本
+
+1. 把 `liquid-glass-ui/assets/liquid-glass.js` 里的 `version: '…'`，以及 CSS / JS 文件头的版本号，改成新版本（比如 `1.0.1`），提交推到 `main`。
+2. 推一个同名标签：`git tag v1.0.1 && git push origin v1.0.1`。
+   （或者在 Actions 页面手动运行「打包 .skill」，填上标签。）
+3. 工作流检查通过后自动在 Releases 页面建好这个版本，挂上 `liquid-glass-ui.skill` 和它的校验和。
+   标签和脚本里的版本号对不上时打包会失败，不会发出一个版本号错的包。
+
+本地打包：`python3 tools/package_skill.py liquid-glass-ui dist`。
 
 ## 许可
 

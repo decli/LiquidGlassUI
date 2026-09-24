@@ -1,0 +1,108 @@
+# 检查 → 打包 .skill →（打了版本标签时）发布到 Releases。
+#
+#   推到 main / 提 PR：只检查、打包，包作为运行产物（Artifacts）留下，不发布
+#   推 vX.Y.Z 标签：检查、打包，并在 Releases 页面建这个版本、挂上 .skill 与校验和
+#   手动运行（Actions 页面 → Run workflow）：填了标签就发布那个版本，不填只打包
+#
+# 发布新版本：先把 liquid-glass.js 里的 version（以及 CSS / JS 文件头的版本号）改成新版本并提交，
+# 再推 vX.Y.Z 标签。标签与脚本里的版本对不上时打包会失败，不会发出一个版本号错的包。
+name: 打包 .skill
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布成哪个版本标签（例如 v1.0.1，须与 liquid-glass.js 里的 version 一致）；留空只打包、不发布'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: skill-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 确定版本
+        id: ver
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG=""
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; fi
+          if [ -n "${INPUT_TAG}" ]; then TAG="${INPUT_TAG}"; fi
+          if [ -n "${TAG}" ] && ! printf '%s' "${TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.]+)?$'; then
+            echo "::error::标签要写成 vX.Y.Z，现在是：${TAG}"; exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "标签：${TAG:-（无，只打包不发布）}"
+
+      - name: 静态检查（ES5、不改 class、令牌一致、类名没拼错）
+        run: node liquid-glass-ui/scripts/check.mjs
+
+      - name: 算法自检（位移贴图、HDR 贴片）
+        run: |
+          python3 liquid-glass-ui/scripts/displacement_map.py --selftest
+          python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liquid-glass.js
+
+      - name: 装 Playwright 与 Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install --with-deps chromium
+
+      - name: 真浏览器校验（三档分得开、每个能点的元素悬停都有反馈、玻璃材质一致）
+        run: node liquid-glass-ui/scripts/shoot.mjs --check
+
+      - name: 打包 .skill
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          if [ -n "${VERSION}" ]; then
+            python3 tools/package_skill.py liquid-glass-ui dist --expect-version "${VERSION}"
+          else
+            python3 tools/package_skill.py liquid-glass-ui dist
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liquid-glass-ui-skill
+          path: dist/
+          if-no-files-found: error
+
+      - name: 发布到 Releases
+        if: steps.ver.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          SHA256="$(cut -d' ' -f1 dist/liquid-glass-ui.skill.sha256)"
+          sed -e "s/{{VERSION}}/${VERSION}/g" -e "s/{{SHA256}}/${SHA256}/g" .github/release-notes.md > dist/notes.md
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/liquid-glass-ui.skill dist/liquid-glass-ui.skill.sha256 --clobber
+            gh release edit "${TAG}" --notes-file dist/notes.md
+          else
+            gh release create "${TAG}" dist/liquid-glass-ui.skill dist/liquid-glass-ui.skill.sha256 \
+              --target "${GITHUB_SHA}" --title "Liquid Glass UI ${TAG}" --notes-file dist/notes.md --latest
+          fi

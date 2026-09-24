@@ -2,7 +2,8 @@
 /**
  * 用真浏览器把演示页（或你自己的页面）拍下来，并验三档是不是真的分得开。
  *
- *   node scripts/shoot.mjs                     拍演示页的整套截图到 ./shots/，并做三档校验
+ *   node scripts/shoot.mjs                     拍演示页的整套截图到 ./shots/，并做三档校验与一致性校验
+ *                                              （每个能点的元素悬停都有反馈；所有玻璃同一种材质、并排的胶囊不一深一浅）
  *   node scripts/shoot.mjs --out design        换输出目录
  *   node scripts/shoot.mjs --check             只做校验，不留截图
  *   node scripts/shoot.mjs --url http://localhost:3000/  拍你自己的页面：浅 / 深 × 三档 6 张全屏，再做同样的三档校验
@@ -114,6 +115,95 @@ async function diff(a, b) {
   return r;
 }
 
+/** 悬停反馈与玻璃材质的一致性（只对演示页） */
+async function consistencyCheck() {
+  const views = [
+    ['主页面', async () => {}],
+    ['工作区菜单', async p => { await p.click('#ws-chip'); await p.waitForTimeout(600); }, '.lg-menu'],
+    ['命令面板', async p => { await p.keyboard.press('Control+k'); await p.waitForTimeout(600); }, '.lg-panel'],
+    ['登录页', async p => { await p.click('#logout'); await p.waitForTimeout(500); }, '.lg-dialog']
+  ];
+  let total = 0;
+  for (const [name, prep, scope] of views) {
+    const o = await open({ mode: 'full' });
+    const p = o.page;
+    await prep(p);
+    const n = await p.evaluate(sc => {
+      const root = sc ? document.querySelector(sc) : document;
+      const els = [...root.querySelectorAll('button, a[href], [role="option"], [role="menuitem"], [role="menuitemradio"], tbody tr')].filter(e => {
+        const r = e.getBoundingClientRect();
+        if (!(r.width > 4 && r.height > 4 && r.top >= 0 && r.bottom <= innerHeight) || e.disabled || e.closest('[hidden]')) { return false; }
+        const hit = document.elementFromPoint(r.left + r.width * 0.4, r.top + r.height / 2);   // 鼠标真点得到它（没被粘住的保存条之类盖住）
+        return !!hit && (hit === e || e.contains(hit));
+      });
+      els.forEach((e, i) => e.setAttribute('data-fb', i));
+      return els.length;
+    }, scope || null);
+    const snap = i => p.evaluate(i => {
+      const e = document.querySelector(`[data-fb="${i}"]`), cs = getComputedStyle(e), bs = getComputedStyle(e, '::before');
+      const r = e.getBoundingClientRect();
+      const lens = [...document.querySelectorAll('.lg-lens')].some(l => {
+        if (!l.parentElement.contains(e) || parseFloat(l.style.getPropertyValue('--a') || 0) < 0.5) { return false; }
+        const q = l.getBoundingClientRect();
+        const ox = Math.max(0, Math.min(q.right, r.right) - Math.max(q.left, r.left)), oy = Math.max(0, Math.min(q.bottom, r.bottom) - Math.max(q.top, r.top));
+        return ox * oy > 0.5 * r.width * r.height;
+      });
+      return { lens, look: [cs.transform, cs.boxShadow, cs.backgroundImage, cs.backgroundColor, bs.backgroundImage].join('|'),
+        label: (e.getAttribute('aria-label') || e.textContent || e.tagName).trim().replace(/\s+/g, ' ').slice(0, 16) };
+    }, i);
+    for (let i = 0; i < n; i++) {
+      await p.mouse.move(1436, 4); await p.waitForTimeout(260);
+      const before = await snap(i);
+      const b = await p.locator(`[data-fb="${i}"]`).boundingBox();
+      await p.mouse.move(b.x + b.width * 0.4, b.y + b.height / 2, { steps: 4 });
+      await p.waitForTimeout(450);
+      const after = await snap(i);
+      if (!after.lens && after.look === before.look) { failures.push(`一致性（${name}）：「${before.label}」悬停没有任何反馈`); }
+    }
+    total += n;
+    await close(o, 'consistency ' + name);
+  }
+  console.log(`  悬停反馈：${total} 个能点的元素逐个悬停过`);
+
+  // 玻璃材质：宿主背景透明；同一类玻璃的玻璃层一样；并排两颗胶囊的底色像素一致
+  const o = await open({ mode: 'full' });
+  const r = await o.page.evaluate(() => {
+    const bad = [], groups = {};
+    document.querySelectorAll('.lg-glass').forEach(g => {
+      const cs = getComputedStyle(g), bs = getComputedStyle(g, '::before'), as = getComputedStyle(g, '::after');
+      const who = (g.id ? '#' + g.id : '.' + [...g.classList].join('.'));
+      if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || cs.backgroundImage !== 'none') { bad.push(who + ' 宿主自己画了背景：' + cs.backgroundColor); }
+      if (!/blur/.test(bs.backdropFilter || bs.webkitBackdropFilter || '')) { bad.push(who + ' 的玻璃层没有背景模糊'); }
+      if (as.content === 'none' || as.backgroundImage === 'none') { bad.push(who + ' 没有高光环'); }
+      const kind = [...g.classList].filter(c => c !== 'lg-glass' && /^lg-/.test(c)).sort().join('.') || 'lg-glass';
+      const sig = [bs.backgroundColor, bs.backgroundImage, bs.backdropFilter].join('|');
+      (groups[kind] = groups[kind] || new Set()).add(sig);
+    });
+    Object.keys(groups).forEach(k => { if (groups[k].size > 1) { bad.push('.' + k + ' 这一类玻璃的玻璃层不一样（' + groups[k].size + ' 种）'); } });
+    const chips = [...document.querySelectorAll('.lg-head .lg-chip')].map(c => { const b = c.getBoundingClientRect(); return { x: b.x + 5, y: b.y + b.height / 2 - 6, width: 3, height: 12 }; });
+    return { bad, chips, count: document.querySelectorAll('.lg-glass').length };
+  });
+  r.bad.forEach(b => failures.push('一致性（玻璃材质）：' + b));
+  const avg = async clip => {
+    const buf = await o.page.screenshot({ clip });
+    return o.page.evaluate(async src => {
+      const i = new Image(); await new Promise(ok => { i.onload = ok; i.src = src; });
+      const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0);
+      const d = g.getImageData(0, 0, i.width, i.height).data; const m = [0, 0, 0];
+      for (let k = 0; k < d.length; k += 4) { m[0] += d[k]; m[1] += d[k + 1]; m[2] += d[k + 2]; }
+      return m.map(v => v / (d.length / 4));
+    }, 'data:image/png;base64,' + buf.toString('base64'));
+  };
+  if (r.chips.length >= 2) {
+    const [a, b] = [await avg(r.chips[0]), await avg(r.chips[1])];
+    const dmax = Math.max(...a.map((v, k) => Math.abs(v - b[k])));
+    console.log(`  并排胶囊底色差：${dmax.toFixed(1)}（0–255）`);
+    if (dmax > 1.5) { failures.push(`一致性（玻璃材质）：页头两颗胶囊底色差 ${dmax.toFixed(1)}，看得出一深一浅`); }
+  }
+  console.log(`  玻璃材质：${r.count} 块玻璃，${r.bad.length ? r.bad.length + ' 处不一致' : '全部一致'}`);
+  await close(o, 'consistency glass');
+}
+
 if (!checkOnly) { await mkdir(outDir, { recursive: true }); }
 
 /**
@@ -198,6 +288,12 @@ if (userUrl) {
   const NAV3 = '.lg-nav-item[data-key="3"]';
   // ── 1 三档校验（演示页：悬停侧栏的「报表」，比整条侧栏；演示页里一定有滑块、保存条一定折射） ──
   const bufs = await modeCheck({ target: NAV3, clip: { x: 0, y: 0, width: 280, height: 900 }, thumb: true, refract: true, save: true });
+
+  // ── 1.5 一致性校验 ──
+  // 评审里被指出过的两类问题：一是「有的按钮悬停有动效、有的没有」，二是「同一种玻璃这里深那里浅」。
+  // 这里把演示页每一个能点的东西都悬停一遍，确认都有反馈（透镜流到它底下，或者它自己浮起 / 变光）；
+  // 再核对所有玻璃是同一种材质：宿主背景透明、玻璃层的底色与模糊一样、并排的胶囊像素上看不出差别。
+  await consistencyCheck();
 
   if (!checkOnly) {
     // ── 2 图集 ──
