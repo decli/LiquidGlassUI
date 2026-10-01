@@ -5,7 +5,8 @@
 #   提 PR：只检查、打包，包作为运行产物（Artifacts）留下
 #   推 vX.Y.Z 标签 / 手动运行（Actions 页面 → Run workflow，填标签）：发布那个版本
 #
-# 发布新版本：把 liquid-glass.js 里的 version（以及 CSS / JS 文件头的版本号）改成新版本，推到 main 即可。
+# 发布新版本：把 liquid-glass.js 里的 version（两处）、CSS / JS 文件头的版本号、package.json 的 version 改成新版本，推到 main 即可
+# （check.mjs 会核对这几处一致）。
 # 标签与脚本里的版本对不上时打包会失败，不会发出一个版本号错的包。
 name: 打包 .skill
 
@@ -108,10 +109,13 @@ jobs:
         run: |
           SHA256="$(cut -d' ' -f1 dist/liquid-glass-ui.skill.sha256)"
           sed -e "s/{{VERSION}}/${VERSION}/g" -e "s/{{SHA256}}/${SHA256}/g" .github/release-notes.md > dist/notes.md
+          # 只要网页套件、不用 Claude 的项目：四个文件单独挂上，直接下载就能用
+          A=liquid-glass-ui/assets
+          FILES="dist/liquid-glass-ui.skill dist/liquid-glass-ui.skill.sha256 ${A}/liquid-glass.css ${A}/liquid-glass.js ${A}/liquid-glass.mjs ${A}/liquid-glass.d.ts"
           if gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" dist/liquid-glass-ui.skill dist/liquid-glass-ui.skill.sha256 --clobber
+            gh release upload "${TAG}" ${FILES} --clobber
             gh release edit "${TAG}" --notes-file dist/notes.md
           else
-            gh release create "${TAG}" dist/liquid-glass-ui.skill dist/liquid-glass-ui.skill.sha256 \
+            gh release create "${TAG}" ${FILES} \
               --target "${GITHUB_SHA}" --title "Liquid Glass UI ${TAG}" --notes-file dist/notes.md --latest
           fi

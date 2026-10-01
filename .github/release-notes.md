@@ -6,12 +6,16 @@
 |---|---|
 | `liquid-glass-ui.skill` | skill 安装包（zip 格式，里面是 `liquid-glass-ui/` 文件夹） |
 | `liquid-glass-ui.skill.sha256` | 校验和：`{{SHA256}}` |
+| `liquid-glass.css`、`liquid-glass.js` | 只要网页套件：拷进项目，`<head>` 里一个 `<link>`、一个 `<script>` 就能用 |
+| `liquid-glass.mjs`、`liquid-glass.d.ts` | ES 模块入口、TypeScript 类型（和 `liquid-glass.js` 放在同一目录） |
 
 ### 安装
 
 - **Claude Code**：`unzip liquid-glass-ui.skill -d ~/.claude/skills/`（只给某一个项目用，就解到 `项目/.claude/skills/`）
 - **claude.ai / Claude 桌面版**：在技能设置里上传这个 `.skill` 文件
-- **只要网页样式、不用 Claude**：解压后拿 `liquid-glass-ui/assets/` 里的 `liquid-glass.css` 与 `liquid-glass.js`，照 `assets/demo/index.html` 的写法用
+- **只要网页样式、不用 Claude**：直接下载上面的 `liquid-glass.css` 与 `liquid-glass.js`；有打包工具的项目也可以
+  `npm i github:decli/LiquidGlassUI#v{{VERSION}}`，然后 `import 'liquid-glass-ui/liquid-glass.css'` + `import LiquidGlass from 'liquid-glass-ui'`。
+  标记照 `assets/demo/index.html` 的写法
 
 装好后对 Claude 说「把这个后台改成液态玻璃风格」「做一个苹果风的分组侧栏」这类话就会用上它。
 

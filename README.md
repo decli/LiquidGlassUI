@@ -1,6 +1,6 @@
 # Liquid Glass UI
 
-一套照 Apple **Liquid Glass（液态玻璃）** 做的网页界面：一个 CSS、一个 ES5 小脚本，不用构建、不依赖任何库、不走 CDN；
+一套照 Apple **Liquid Glass（液态玻璃）** 做的网页界面：一个 CSS、一个 ES5 小脚本，不用构建、不依赖任何库、不走 CDN，页面里两行或 `npm i` 一行就能用上；
 同时也是一个可以直接装进 Claude 的 **skill**——对 Claude 说「把这个后台改成液态玻璃风格」，它就照这套定稿来做。
 
 ![浅色](design/light.png)
@@ -30,34 +30,38 @@
 
 ## 在网页项目里用
 
-1. 把 `liquid-glass-ui/assets/liquid-glass.css` 和 `liquid-glass.js` 拷进项目的静态目录。
-2. `<head>` 里引样式表，加一段不闪的内联脚本；`<body>` 最后引脚本：
+脚本引进来就自己跑，不用初始化。三种引法选一种（详见[接入指南 §1](liquid-glass-ui/references/integration.md)）：
+
+**页面里两行**——把 `liquid-glass-ui/assets/` 下的 `liquid-glass.css`、`liquid-glass.js` 拷进项目：
 
 ```html
-<html lang="zh-CN">
 <head>
   <link rel="stylesheet" href="/static/liquid-glass.css">
-  <script>
-  (function () {
-    var d = document.documentElement, g = null;
-    try { g = localStorage.getItem('lg.glass'); } catch (e) {}
-    if (g !== 'full' && g !== 'lite' && g !== 'off') { g = 'auto'; }
-    d.setAttribute('data-lg-mode', g);
-    d.setAttribute('data-lg-tier', g === 'off' || g === 'lite' ? 'l0' : 'l1');
-  })();
-  </script>
+  <script src="/static/liquid-glass.js"></script>
 </head>
 <body class="lg-page">
   <aside class="lg-glass lg-sidebar">…</aside>
   <button class="lg-btn lg-btn--primary">保存</button>
   <div class="lg-seg"><button aria-pressed="true">今天</button><button aria-pressed="false">本周</button></div>
-  …
-  <script src="/static/liquid-glass.js"></script>
 </body>
 ```
 
-3. 照 `liquid-glass-ui/assets/demo/index.html` 的结构给元素套上组件类。完整说明见
-   [接入指南](liquid-glass-ui/references/integration.md)。
+**npm / 打包工具**（Vite、webpack、Next.js、Nuxt……；服务端渲染时 import 也不会报错）：
+
+```bash
+npm i github:decli/LiquidGlassUI#v1.1.0
+```
+
+```js
+import 'liquid-glass-ui/liquid-glass.css';
+import LiquidGlass from 'liquid-glass-ui';
+LiquidGlass.init({ storageKey: 'myapp.glass' });   // 可选：改配置
+```
+
+**浏览器原生 ES 模块**：`import LiquidGlass from '/static/liquid-glass.mjs'`（`liquid-glass.js` 放在同一目录）。
+
+然后照 `liquid-glass-ui/assets/demo/index.html` 的结构给元素套上组件类。带 TypeScript 类型；`LiquidGlass` 的接口只有
+`init / mode / tier / setMode / refresh / describe / notify` 几个，全都可选。
 
 看演示：
 
@@ -95,7 +99,9 @@ liquid-glass-ui/                 ← skill 本体（整个文件夹拷走即可�
 ├── SKILL.md                     skill 入口：什么时候用、工作流程、不能破的规则
 ├── assets/
 │   ├── liquid-glass.css         令牌 + 玻璃材质 + 组件 + 分档
-│   ├── liquid-glass.js          交互层（ES5）：折射、透镜、液态滑块、分段开关的浮起与拖动、指尖光、玻璃提示、HDR、三档
+│   ├── liquid-glass.js          交互层（ES5，通用模块）：折射、透镜、液态滑块、分段开关的浮起与拖动、指尖光、玻璃提示、HDR、三档
+│   ├── liquid-glass.mjs         ES 模块入口（import LiquidGlass from …）
+│   ├── liquid-glass.d.ts        TypeScript 类型
 │   └── demo/index.html          完整演示页
 ├── references/
 │   ├── design-spec.md           设计规范（定稿）
@@ -109,6 +115,7 @@ liquid-glass-ui/                 ← skill 本体（整个文件夹拷走即可�
     ├── displacement_map.py      位移贴图 / 静态 SVG 滤镜生成器
     └── hdr_png.py               HDR 高光贴片生成器
 design/                          定稿截图（由 scripts/shoot.mjs 拍的）
+package.json                     npm i github:decli/LiquidGlassUI 装的就是它（包里只有 assets 下那四个文件）
 tools/package_skill.py           把 liquid-glass-ui/ 打成 .skill（与官方 skill-creator 同格式，可复现）
 .github/workflows/skill.yml      检查 → 打包 →（推版本标签时）发布到 Releases
 ```
@@ -125,10 +132,10 @@ tools/package_skill.py           把 liquid-glass-ui/ 打成 .skill（与官方 
 ## 改完怎么验
 
 ```bash
-node liquid-glass-ui/scripts/check.mjs         # ES5、不改 class、令牌一致、类名没拼错
+node liquid-glass-ui/scripts/check.mjs         # ES5、不改 class、令牌一致、类名没拼错、版本号各处一致、服务端渲染时 import 不报错
 node liquid-glass-ui/scripts/shoot.mjs         # 拍演示页整套截图，并验：三档分得开、每个能点的元素悬停都有反馈、所有玻璃同一种材质、
                                                # 玻璃正中逐像素不动而外圈在弯、分段开关与玻璃导航条按住 / 拖 / 甩 / 橡皮筋都对、
-                                               # 真滚动条 + 2 倍屏下点表格每一行滚动条都不闪（需要 Playwright）
+                                               # 真滚动条 + 2 倍屏下点表格每一行滚动条都不闪、几种引入方式都能用（需要 Playwright）
 python3 liquid-glass-ui/scripts/displacement_map.py --selftest   # 位移曲线不折叠、九宫格拼回去和整张一样
 python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liquid-glass.js
 ```

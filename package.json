@@ -1,0 +1,37 @@
+{
+  "name": "liquid-glass-ui",
+  "version": "1.1.0",
+  "description": "Apple Liquid Glass（液态玻璃）风格的网页套件：零依赖的 CSS + ES5 脚本（边缘折射、流动透镜、液态滑块、指尖光、玻璃提示、HDR 高光、三档与自动降级）",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/decli/LiquidGlassUI.git"
+  },
+  "keywords": ["liquid-glass", "glassmorphism", "ios-26", "css", "ui-kit"],
+  "main": "liquid-glass-ui/assets/liquid-glass.js",
+  "module": "liquid-glass-ui/assets/liquid-glass.mjs",
+  "types": "liquid-glass-ui/assets/liquid-glass.d.ts",
+  "style": "liquid-glass-ui/assets/liquid-glass.css",
+  "exports": {
+    ".": {
+      "types": "./liquid-glass-ui/assets/liquid-glass.d.ts",
+      "import": "./liquid-glass-ui/assets/liquid-glass.mjs",
+      "default": "./liquid-glass-ui/assets/liquid-glass.js"
+    },
+    "./liquid-glass.css": "./liquid-glass-ui/assets/liquid-glass.css",
+    "./css": "./liquid-glass-ui/assets/liquid-glass.css",
+    "./liquid-glass.js": "./liquid-glass-ui/assets/liquid-glass.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "liquid-glass-ui/assets/liquid-glass.css",
+    "liquid-glass-ui/assets/liquid-glass.js",
+    "liquid-glass-ui/assets/liquid-glass.mjs",
+    "liquid-glass-ui/assets/liquid-glass.d.ts"
+  ],
+  "sideEffects": [
+    "*.css",
+    "./liquid-glass-ui/assets/liquid-glass.js",
+    "./liquid-glass-ui/assets/liquid-glass.mjs"
+  ]
+}

@@ -19,7 +19,7 @@ description: >-
 分段开关像 iOS 26 的标签栏，按住任一项它浮起成一块盖在字上面、会折射的透镜，能拖、拖过两端像橡皮筋；
 还有一条浮在内容上面的玻璃导航条（`.lg-seg--glass`，图标 + 字）。
 玻璃边的折射照 iOS 26：边上那一圈把背后的内容放大、轻微模糊、泛一层乳白和一点彩边，正中一个像素都不动。
-不需要构建、不依赖任何库、不走 CDN；不加载脚本页面照样能用。
+不需要构建、不依赖任何库、不走 CDN；不加载脚本页面照样能用。脚本引进来就自己跑：页面里两行标签，或者 `npm i` 之后 import 一次。
 
 这里的每个数值和做法都经过了多轮真机评审——先用现成的，别从零重写。
 
@@ -28,7 +28,8 @@ description: >-
 | 路径 | 是什么 | 什么时候用 |
 |---|---|---|
 | `assets/liquid-glass.css` | 令牌（浅 / 深 / 跟随系统）+ 玻璃材质 + 全部组件 + 分档与无障碍 | 拷进项目 |
-| `assets/liquid-glass.js` | ES5 交互层：分档、折射（九宫格位移贴图 + 滤镜链）、透镜、液态滑块、分段开关的浮起与拖动、指尖光、玻璃提示、HDR | 拷进项目 |
+| `assets/liquid-glass.js` | ES5 交互层（通用模块：`<script>` / CommonJS / 打包工具都能用，服务端渲染时是不报错的替身）：分档、折射（九宫格位移贴图 + 滤镜链）、透镜、液态滑块、分段开关的浮起与拖动、指尖光、玻璃提示、HDR | 拷进项目 |
+| `assets/liquid-glass.mjs`、`assets/liquid-glass.d.ts` | ES 模块入口、TypeScript 类型 | 项目用 ES 模块 / TypeScript 时一起拷 |
 | `assets/demo/index.html` | 完整的演示页（侧栏、页头、表单、分段、表格、弹出菜单、命令面板、登录页、折射演示） | **写标记前先打开看、照抄结构** |
 | `scripts/check.mjs` | 静态检查：ES5、不改 class、令牌一致、类名没拼错（只要 Node） | 改过 CSS / JS 之后 |
 | `scripts/shoot.mjs` | 真浏览器截图 + 三档可区分校验（要 Playwright） | 交付前；给用户看效果 |
@@ -51,8 +52,13 @@ description: >-
 
 ### 2. 接入
 
-1. 把 `assets/liquid-glass.css`、`assets/liquid-glass.js` 拷进项目静态目录（保留文件头注释）。
-2. `<head>`：样式表 + 不闪的内联脚本（先写好 `data-lg-mode` 与临时材质档）。`<body>` 最后：脚本。代码见 `references/integration.md` §1。
+1. 引入，按项目的形态选一种（`references/integration.md` §1）：
+   - **普通页面 / 服务端模板**：把 `assets/liquid-glass.css`、`assets/liquid-glass.js` 拷进项目静态目录（保留文件头注释），
+     `<head>` 里一个 `<link>`、一个 `<script>`——脚本放 `<head>` 时自己会在页面画出来之前写好档位，不用再加内联脚本。
+   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.1.0`（用户能访问这个仓库时），
+     入口里 `import 'liquid-glass-ui/liquid-glass.css'` + `import LiquidGlass from 'liquid-glass-ui'`；访问不了就把 assets 下四个文件拷进项目，
+     照样 import 相对路径。要改配置在 import 之后调 `LiquidGlass.init({ … })`。服务端渲染时 import 不会报错，不用 `typeof window` 判断。
+2. 不要在组件里初始化、也不要在路由切换后调什么：脚本用 `MutationObserver` 自己发现变化。`init()` 整页一份，只在启动时调。
 3. 按 `assets/demo/index.html` 的结构给页面元素套组件类。凡是玻璃都带 `.lg-glass`，再加具体组件类
    （`.lg-sidebar`、`.lg-chip`、`.lg-menu`、`.lg-panel`、`.lg-toolbar`、`.lg-dialog`……）。完整列表见 integration.md §2。
 4. 自己的结构用 data 属性接：`data-lg-lens`（透镜）、`data-lg-slider`（液态滑块）、`data-lg-refract`（折射）、
@@ -71,7 +77,8 @@ node scripts/check.mjs [你的.css 你的.js 你的页面.html]   # 不给参数
 node scripts/shoot.mjs --url http://localhost:8080/ [--key 你的档位存储键] [--hover '悬停哪一项']
 # 浅 / 深 × 三档 6 张全屏 + 三档校验；不给 --url 就拍演示页的整套截图，
 # 并逐个悬停演示页里每一个能点的元素（都要有反馈）、核对所有玻璃是同一种材质、
-# 核对玻璃正中和不折射时逐像素一样而外圈在弯、把分段开关按住 / 拖 / 甩 / 拉过两端 / 精简档都过一遍
+# 核对玻璃正中和不折射时逐像素一样而外圈在弯、把分段开关按住 / 拖 / 甩 / 拉过两端 / 精简档都过一遍，
+# 再另开一个真画滚动条、真按 2 倍渲染的浏览器，点表格每一行、看滚动条闪不闪
 ```
 
 然后按 integration.md §11 的清单真机过一遍（设备像素比 1 和 2、快速划过菜单、跨很远换选中、打开弹出层、系统无障碍设置）。
@@ -104,7 +111,9 @@ node scripts/shoot.mjs --url http://localhost:8080/ [--key 你的档位存储键
 - **「给我的后台 / 管理页换成液态玻璃」**：按上面的工作流程；侧栏用分组底板（design-spec.md §4.2），这是评审后定稿的样子。
 - **「只要毛玻璃，不要那么多动效」**：照常接入，把缺省档设成精简（`<head>` 脚本里没存值时写 `lite`），或者只用 CSS、不加载脚本。
 - **「背景是图片 / 视频，想看到折射」**：给侧栏、页头胶囊加 `data-lg-refract`（背后有内容时折射才有意义）；注意 pitfalls.md #16 的性能。
-- **「在 React / Vue 里用」**：脚本全局加载一次即可，状态用 `aria-*` 表达；见 integration.md §9。
+- **「在 React / Vue / Next.js 里用」**：入口里 import 样式和脚本各一次即可（服务端渲染安全），状态用 `aria-*` 表达；见 integration.md §1 B 与 §9。
+- **「封装成库给别的项目用」**：已经是了——仓库根的 `package.json` 让 `npm i github:decli/LiquidGlassUI` 直接可用，
+  包里只有 `liquid-glass.css / .js / .mjs / .d.ts` 四个文件；不要再包一层类或组件，接口就是全局的 `LiquidGlass`（integration.md §6）。
 - **「换成别的品牌色 / 暗色为主」**：只改令牌；改完跑 `check.mjs`（它会核对两块深色令牌一致）。
 - **「要 iOS 26 那样的底部导航条」**：`<nav class="lg-glass lg-seg lg-seg--glass">`，项是 `<button aria-pressed>` 里一个图标 + 一个 `<span>`，
   粘在能滚的内容底部（integration.md §7.3）；无头截图里矮条看着没模糊是无头浏览器的问题（pitfalls.md #34），要在实机上看。

@@ -4,11 +4,11 @@
 
 ## 目录
 
-1. 最小接入（三步）
+1. 引入（四种方式选一种）：页面两行 / npm 与打包工具 / 原生 ES 模块 / 只要样式
 2. 组件类速查
 3. data 属性速查（自己的结构怎么接）
 4. 页面负责写的状态
-5. 全局配置 `LiquidGlassConfig`
+5. 全局配置 `LiquidGlassConfig` / `LiquidGlass.init()`
 6. 脚本接口与事件
 7. 常见做法：加一块玻璃、加一组可悬停的项、加一个多选一、三档开关、链接式侧栏、窄屏
 8. 主题与品牌色
@@ -18,41 +18,76 @@
 
 ---
 
-## 1. 最小接入（三步）
+## 1. 引入（四种方式选一种）
 
-**① 拷两个文件**进项目的静态目录：`assets/liquid-glass.css`、`assets/liquid-glass.js`。不需要构建，不依赖任何库，不走 CDN。
+套件就是一个样式表加一个脚本，脚本**引进来就自己跑**：不用 `new`、不用调初始化、不用在路由切换后通知它。
+几种方式拿到的是同一个东西，同一页面里混用、重复引入也只跑一份。
 
-**② `<head>` 里**：样式表 + 一段不闪的内联脚本（赶在样式生效前定好主题与档位，否则深色下会先闪一下浅色）。
+### A. 页面里两行（最简单）
+
+把 `assets/liquid-glass.css`、`assets/liquid-glass.js` 拷进项目的静态目录（不需要构建、不依赖任何库、不走 CDN），然后：
 
 ```html
-<html lang="zh-CN">
 <head>
   <link rel="stylesheet" href="/static/liquid-glass.css">
-  <script>
-  (function () {
-    var d = document.documentElement, g = null;
-    try { g = localStorage.getItem('lg.glass'); } catch (e) {}
-    if (g !== 'full' && g !== 'lite' && g !== 'off') { g = 'auto'; }
-    d.setAttribute('data-lg-mode', g);
-    d.setAttribute('data-lg-tier', g === 'off' || g === 'lite' ? 'l0' : 'l1');
-    // 主题：data-theme = light | dark | auto；不写就跟随系统
-  })();
-  </script>
+  <script src="/static/liquid-glass.js"></script>
 </head>
 ```
 
-存储键 `lg.glass` 要和第 ③ 步 `LiquidGlassConfig.storageKey` 一致（缺省就是它）。
+再给页面元素套上组件类（第 2 节）。先打开 `assets/demo/index.html` 看一遍完整的写法，照抄最快。
 
-**③ `<body>` 最后**：脚本。
+脚本放在 `<head>` 里（同步加载）时，它在页面画出来之前就把用户选过的档位写到 `<html>` 上——选过「关闭 / 精简」的用户刷新时不会先闪一下玻璃。
+放在 `</body>` 前、或者加了 `defer` 也能用，只是想要不闪就在 `<head>` 里补一段内联脚本做同样的事（存储键要和配置里的一致）：
 
 ```html
-  <script src="/static/liquid-glass.js"></script>
-</body>
+<script>
+(function () {
+  var d = document.documentElement, g = null;
+  try { g = localStorage.getItem('lg.glass'); } catch (e) {}
+  if (g !== 'full' && g !== 'lite' && g !== 'off') { g = 'auto'; }
+  d.setAttribute('data-lg-mode', g);
+  d.setAttribute('data-lg-tier', g === 'off' || g === 'lite' ? 'l0' : 'l1');
+})();
+</script>
 ```
 
-然后给页面元素套上组件类（第 2 节）。先打开 `assets/demo/index.html` 看一遍完整的写法，照抄最快。
-
+深色主题缺省跟随系统；要固定就在 `<html>` 上写 `data-theme="light"` / `"dark"`（第 8 节）。
 `<html lang>` 以 `zh` 开头时，脚本弹出的提示是中文，否则是英文。
+
+### B. npm / 打包工具（Vite、webpack、Next.js、Nuxt……）
+
+```bash
+npm i github:decli/LiquidGlassUI#v1.1.0     # 装某个发布版；仓库是私有的，本机的 git 要能 clone 它
+```
+
+```js
+// 应用入口（main.ts / _app.tsx / app.vue……）里两行
+import 'liquid-glass-ui/liquid-glass.css';
+import LiquidGlass from 'liquid-glass-ui';
+
+LiquidGlass.init({ storageKey: 'myapp.glass' });   // 可选：要改配置才调（第 5 节）
+```
+
+- `import` 会被提到文件最前面，来不及先写 `window.LiquidGlassConfig`——要改配置就在 import 之后调 `LiquidGlass.init()`。
+- **服务端渲染安全**：在服务端（没有 `window`）`import` 不会报错，拿到的是一个什么都不做的替身（`LiquidGlass.supported === false`），
+  到了浏览器里才真的跑。不用 `typeof window` 判断，也不用动态 import。
+- 带 TypeScript 类型（`liquid-glass.d.ts`）：`LiquidGlassOptions`、`LiquidGlassApi`，`document` 上的 `lg:modechange` 事件也有类型。
+- 包里只有四个文件：`liquid-glass.css`、`liquid-glass.js`、`liquid-glass.mjs`、`liquid-glass.d.ts`，零依赖。
+- `require('liquid-glass-ui')` 也行（CommonJS）。不支持 AMD：老后台里常有 RequireJS，一个匿名 `define()` 落在它外面就是一个报错。
+
+### C. 浏览器原生 ES 模块
+
+```html
+<link rel="stylesheet" href="/static/liquid-glass.css">
+<script type="module">
+  import LiquidGlass from '/static/liquid-glass.mjs';   // liquid-glass.js 要放在同一个目录
+  LiquidGlass.init({ storageKey: 'myapp.glass' });      // 可选
+</script>
+```
+
+### D. 只要样式
+
+只引 `liquid-glass.css` 也能用：毛玻璃、高光环、组件样式都在，悬停叠一层薄暗、选中项用自己的底色；没有透镜、滑块和折射。
 
 ## 2. 组件类速查
 
@@ -126,9 +161,10 @@
 | 侧栏折叠 | `.lg-sidebar[data-collapsed="true"]` |
 | 主题 | `<html data-theme="light|dark|auto">`（写在 `<html>` 上，不要写在 `<body>`） |
 
-## 5. 全局配置 `LiquidGlassConfig`
+## 5. 全局配置 `LiquidGlassConfig` / `LiquidGlass.init()`
 
-写在加载 `liquid-glass.js` **之前**，全部可选：
+全部可选，两种写法选项一样：页面里在加载脚本**之前**写 `window.LiquidGlassConfig = { … }`；用打包工具时在 import **之后**调
+`LiquidGlass.init({ … })`——只覆盖给了的那几项，已经跑起来了就按新配置整套重来一遍（一般只在启动时调一次）。
 
 ```html
 <script>
@@ -153,6 +189,8 @@ window.LiquidGlassConfig = {
 
 ```js
 LiquidGlass.version      // '1.1.0'
+LiquidGlass.supported    // true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身（方法都在，什么都不做）
+LiquidGlass.init({ … })  // 换配置（第 5 节），返回 LiquidGlass 本身
 LiquidGlass.mode()       // 用户选的档：'auto' | 'full' | 'lite' | 'off'
 LiquidGlass.tier()       // 实际材质档：'l0' | 'l1' | 'l2' | 'l3'
 LiquidGlass.setMode('lite', true)   // 换档（'auto' 回到自动）；第二个参数 true 时弹一句提示
@@ -165,7 +203,8 @@ document.addEventListener('lg:modechange', function (e) {
 });
 ```
 
-脚本在不支持 CSS 变量或 `Element.closest` 的浏览器上什么都不做，`window.LiquidGlass` 也不存在——用之前先判断。
+服务端渲染（没有 `window`）和不支持 CSS 变量或 `Element.closest` 的浏览器（IE11）上，`LiquidGlass` 是一个替身：
+方法都在、调了什么都不做，`supported` 为 `false`。调用方不用先判断能不能用。
 
 ## 7. 常见做法
 
@@ -314,11 +353,13 @@ document.addEventListener('lg:modechange', function (e) {
 ## 9. 在 React / Vue / 其他框架里用
 
 - 脚本挂在 `document` 上监听事件、用 `MutationObserver` 发现变化，**不需要**在组件里初始化，也不需要在路由切换后调用什么。
-  放在 `index.html` 里加载一次即可（或在应用入口 `import './liquid-glass.js'`，它会自己挂到 `window`）。
+  在应用入口 `import 'liquid-glass-ui/liquid-glass.css'` + `import LiquidGlass from 'liquid-glass-ui'` 一次即可（第 1 节 B），
+  或者在 `index.html` 里用两行标签引入。不要在组件里反复 `init()`——它是整页一份的，换配置会整套重来。
 - 它往容器末尾追加的元素（`.lg-lens`、`.lg-thumb`、`.lg-lift`、`.lg-hdr`）是框架不认识的节点。React / Vue 只增删自己的节点，
   追加在末尾的外来节点不影响对比；容器整个被卸载时它们跟着消失，脚本下一帧发现后自己清理。
 - 选中状态用 `aria-*` 属性表达（第 4 节），不要只靠 `className` 切换——那样透镜认不出「选中」形态（滑块也找不到选中项）。
-- 服务端渲染：`<head>` 那段不闪脚本放进文档模板；`data-lg-*` 由脚本在客户端写，服务端不用管。
+- 服务端渲染：`import` 在服务端是安全的（拿到替身，第 1 节 B）；想要不闪，把第 1 节那段内联脚本放进文档模板的 `<head>`；
+  `data-lg-*` 由脚本在客户端写，服务端不用管。
 - 不要让框架管 `<html>` 上的 `data-lg-mode` / `data-lg-tier` / `data-lg-lens` / `data-lg-js`。
 - 分段开关拖完是「替用户点一下」：受控组件（React 的 `onClick`、Vue 的 `@click`）照常收到点击，值由组件自己改，不需要额外接线。
 

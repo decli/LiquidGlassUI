@@ -17,12 +17,19 @@
  *   6 玻璃提示：把 title 小黄框换成玻璃气泡，离开时原样放回（读屏照样读得到）。
  *   7 HDR 高光：HDR 屏上玻璃上沿一道比页面白更亮的光。
  *
+ * 引入（详见 references/integration.md §1）：
+ *   · 页面里 <script src="liquid-glass.js"> 一行（配一行 liquid-glass.css）：自己跑起来，全局有 LiquidGlass；
+ *   · 打包工具 / 框架里 import LiquidGlass from 'liquid-glass-ui'（npm i github:decli/LiquidGlassUI），
+ *     要改配置就在 import 之后调 LiquidGlass.init({ … })；
+ *   · 服务端渲染（没有 window）、太老的浏览器：拿到的是一个什么都不做的替身，照常调用不会报错。
+ *
  * 配置两种写法，可以混用：
  *   · 用 liquid-glass.css 里的组件类（.lg-nav、.lg-seg、.lg-menu、.lg-panel、.lg-list、.lg-table-wrap……），
  *     下面的 PRESETS 已经给它们配好了透镜、滑块、折射，不用再写什么；
  *   · 自己的结构用 data 属性打开：data-lg-lens、data-lg-slider、data-lg-refract、data-lg-hdr、data-lg-tip、data-lg-glow。
  *     详见 references/integration.md。
- *   · 全局选项写在加载本文件之前的 window.LiquidGlassConfig 里（存储键、提示文案、是否弹提示……）。
+ *   · 全局选项写在加载本文件之前的 window.LiquidGlassConfig 里（存储键、提示文案、是否弹提示……），
+ *     或者加载之后调 LiquidGlass.init(同一套选项)。
  *
  * 纪律（改之前先看）：
  *   · 只写 data-* 属性、内联 style 与 CSS 变量，不增删页面元素的 class——不少页面脚本按 className 全等判断，
@@ -32,21 +39,40 @@
  *     所以透镜的淡入淡出只改子层的 opacity，外层只改 transform。
  *   · 只用 ES5：老浏览器上一个语法错误就是整个文件不执行。scripts/check.mjs 会拦。
  */
-(function (win, doc) {
+(function (root, factory) {
+  // 通用模块：<script> 引入 → 全局 LiquidGlass；CommonJS / 打包工具 → module.exports（全局也照样有一份）。
+  // 不走 AMD：老后台里常有 RequireJS，一个匿名 define() 落在它外面就是一个报错
+  var api = factory(typeof window !== 'undefined' ? window : null, typeof document !== 'undefined' ? document : null);
+  if (typeof module === 'object' && module && module.exports) { module.exports = api; }
+  if (root && !root.LiquidGlass) { root.LiquidGlass = api; }
+})(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (win, doc) {
   'use strict';
+
+  /**
+   * 什么都不做的替身：服务端渲染（没有 window / document）、太老的浏览器（样式表的降级规则兜底）。
+   * 方法都在、都不报错，调用方不用先判断「能不能用」
+   */
+  function inert() {
+    var self = {
+      version: '1.1.0', supported: false,
+      init: function () { return self; }, mode: function () { return 'off'; }, tier: function () { return 'l0'; },
+      setMode: function () {}, refresh: function () {}, describe: function () { return ''; }, notify: function () {}
+    };
+    return self;
+  }
+  if (!win || !doc) { return inert(); }
 
   var root = doc.documentElement;
   var CSSx = win.CSS;
   // 太老的浏览器（IE11 等）：没有 CSS 变量或 closest，什么都不做，样式表的降级规则兜底
   if (!CSSx || typeof CSSx.supports !== 'function' || !CSSx.supports('--lg-probe', '0')
       || !win.requestAnimationFrame || !Element.prototype.closest || !Element.prototype.matches) {
-    return;
+    return inert();
   }
-  if (win.LiquidGlass && win.LiquidGlass.version) { return; }       // 加载了两遍
+  if (win.LiquidGlass && win.LiquidGlass.version) { return win.LiquidGlass; }       // 加载了两遍（比如 <script> 和 import 各一次）
 
-  var CFG = win.LiquidGlassConfig || {};
-  var MODE_KEY = CFG.storageKey || 'lg.glass';
-  var SLOW_KEY = MODE_KEY + '.slow';
+  // 配置推导出来的值：configure() 写，LiquidGlass.init() 换配置时重写
+  var CFG, MODE_KEY, SLOW_KEY, M, LENS, SLIDER, REFRACT, HDR, TIP_SEL, TIP_ALT, GLOW_SEL, ON_SEL;
   var SVGNS = 'http://www.w3.org/2000/svg', XLINK = 'http://www.w3.org/1999/xlink';
 
   /* ── 文案：页面 lang 以 zh 开头用中文，否则英文；LiquidGlassConfig.messages 可逐条覆盖 ── */
@@ -76,8 +102,6 @@
       switchTitle: 'Glass effects. ', toast: 'Glass effects · '
     }
   };
-  var M = TEXT[(CFG.lang || root.getAttribute('lang') || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'];
-  if (CFG.messages) { M = assign(assign({}, M), CFG.messages); }
 
   function assign(a, b) { for (var k in b) { if (Object.prototype.hasOwnProperty.call(b, k)) { a[k] = b[k]; } } return a; }
   function load(k) { try { return win.localStorage.getItem(k); } catch (e) { return null; } }
@@ -109,7 +133,7 @@
    *   bezel 玻璃边宽（px）；depth 最外缘位移（px，缺省 0.45 × bezel）；disp 色散（缺省 0.08）；scatter 边上乳白的浓度（缺省 0.05）
    * 滑块（slider）kind 为 seg 的（分段开关）还能按住拖：按住选中项它浮起成一块会折射的透镜，见 §5.5。
    */
-  var PRE = CFG.presets === false ? {} : {
+  var PRESETS = {
     lens: [
       { sel: '.lg-nav', items: '.lg-nav-item, .lg-nav-group', pad: 3, mag: 0.025 },
       { sel: '.lg-seg', items: '.lg-seg > button', pad: 0, mag: 0.04 },
@@ -138,15 +162,25 @@
       { sel: '.lg-seg--glass', spots: 'top' }
     ]
   };
-  var LENS = CFG.lens || PRE.lens || [];
-  var SLIDER = CFG.slider || PRE.slider || [];
-  var REFRACT = CFG.refract || PRE.refract || [];
-  var HDR = CFG.hdr || PRE.hdr || [];
-  var TIP_SEL = CFG.tips || '[data-lg-tip][title], [data-lg-tip] [title], .lg-sidebar [title], .lg-chip[title], [data-lg-mode-switch][title]';
-  var TIP_ALT = TIP_SEL + ', ' + TIP_SEL.replace(/\[title\]/g, '[data-lg-title]');
-  var GLOW_SEL = CFG.glow || '.lg-btn, .lg-chip, [data-lg-glow]';
-  // 「选中」除了 aria-* 之外还认哪些写法。页面自己用 class 标选中（比如 .on、.active）时，在 LiquidGlassConfig.on 里补上
-  var ON_SEL = '.is-cursor, .is-active, [data-lg-on]' + (CFG.on ? ', ' + CFG.on : '');
+  /** 读一套配置（window.LiquidGlassConfig 或 LiquidGlass.init 给的），算出各处要用的值 */
+  function configure(c) {
+    CFG = c || {};
+    MODE_KEY = CFG.storageKey || 'lg.glass';
+    SLOW_KEY = MODE_KEY + '.slow';
+    M = TEXT[(CFG.lang || root.getAttribute('lang') || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'];
+    if (CFG.messages) { M = assign(assign({}, M), CFG.messages); }
+    var pre = CFG.presets === false ? {} : PRESETS;
+    LENS = CFG.lens || pre.lens || [];
+    SLIDER = CFG.slider || pre.slider || [];
+    REFRACT = CFG.refract || pre.refract || [];
+    HDR = CFG.hdr || pre.hdr || [];
+    TIP_SEL = CFG.tips || '[data-lg-tip][title], [data-lg-tip] [title], .lg-sidebar [title], .lg-chip[title], [data-lg-mode-switch][title]';
+    TIP_ALT = TIP_SEL + ', ' + TIP_SEL.replace(/\[title\]/g, '[data-lg-title]');
+    GLOW_SEL = CFG.glow || '.lg-btn, .lg-chip, [data-lg-glow]';
+    // 「选中」除了 aria-* 之外还认哪些写法。页面自己用 class 标选中（比如 .on、.active）时，在 on 里补上
+    ON_SEL = '.is-cursor, .is-active, [data-lg-on]' + (CFG.on ? ', ' + CFG.on : '');
+  }
+  configure(win.LiquidGlassConfig);
   var DANGER_SEL = '.lg-nav-item--danger, [data-lg-danger]';
 
   /* ══ 1 分档 ═════════════════════════════════════════════════════════════ */
@@ -1767,7 +1801,10 @@
     syncHdr();
   }
 
+  var started = false;
   function start() {
+    if (started) { return; }
+    started = true;
     if (typeof win.MutationObserver === 'function') {
       new win.MutationObserver(scheduleSync).observe(doc.body, {
         subtree: true, childList: true, attributes: true,
@@ -1787,9 +1824,51 @@
 
   // data-lg-js：脚本在。三档开关靠它才显示——「关闭」时 data-lg-lens 会被撤掉，开关不能跟着消失
   root.setAttribute('data-lg-js', '');
+  // 放在 <head> 里同步加载时，赶在页面画出来之前先把档位写上（就是 integration.md 里那段「不闪」的内联脚本做的事）：
+  // 用户选过「关闭 / 精简」的，刷新时不会先闪一下玻璃。材质先按 l0 / l1 写，跑起来以后再按浏览器与显卡升上去
+  if (!root.hasAttribute('data-lg-mode')) {
+    var p0 = pref();
+    root.setAttribute('data-lg-mode', p0);
+    if (!root.hasAttribute('data-lg-tier')) { root.setAttribute('data-lg-tier', p0 === 'off' || p0 === 'lite' ? 'l0' : 'l1'); }
+  }
 
-  win.LiquidGlass = {
+  /** 撤掉所有折射（换配置时：新的预设可能不再给这些元素折射） */
+  function forgetRefract() {
+    for (var i = 0; i < refractNodes.length; i++) {
+      var n = refractNodes[i];
+      if (n.__lgR) { dropFilter(n.__lgR.F); n.__lgR = null; }
+      n.removeAttribute('data-lg-refract-on');
+      n.style.removeProperty('--lg-ref');
+    }
+    refractNodes = [];
+  }
+
+  /**
+   * 换配置：和 window.LiquidGlassConfig 同一套选项，只覆盖给了的那几项。打包工具里 import 会被提到最前面，
+   * 来不及在加载前写全局配置，就在 import 之后调它。还没跑起来（页面没加载完）就只是记下；
+   * 已经跑起来了就按新配置整套重来一遍——撤掉透镜、滑块、折射、HDR 高光，再按新的预设长出来。一般只在启动时调一次
+   */
+  function init(options) {
+    configure(assign(assign({}, CFG), options || {}));
+    try { slow = win.sessionStorage.getItem(SLOW_KEY) === '1'; } catch (e) { slow = false; }
+    if (started) {
+      teardown();
+      forgetRefract();
+      var hs = doc.querySelectorAll('img.lg-hdr');
+      for (var i = 0; i < hs.length; i++) { if (hs[i].parentNode) { hs[i].parentNode.removeChild(hs[i]); } }
+      mode = ''; tier = '';                            // 让 applyTier 按新配置整套重写一遍
+      applyTier();
+      sync();
+    }
+    return api;
+  }
+
+  var api = win.LiquidGlass = {
     version: '1.1.0',
+    /** true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身 */
+    supported: true,
+    /** 换配置（同 window.LiquidGlassConfig 的选项），返回 LiquidGlass 本身 */
+    init: init,
     /** 用户选的档：'auto' | 'full' | 'lite' | 'off' */
     mode: function () { return pref(); },
     /** 实际的材质档：'l0' | 'l1' | 'l2' | 'l3' */
@@ -1804,4 +1883,5 @@
   };
 
   if (doc.body) { start(); } else { doc.addEventListener('DOMContentLoaded', start); }
-})(window, document);
+  return api;
+});

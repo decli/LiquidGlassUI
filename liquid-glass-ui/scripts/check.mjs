@@ -16,7 +16,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const assets = resolve(here, '..', 'assets');
@@ -151,6 +151,32 @@ if (!argv.length) {
   check('折射的位移曲线常数与 displacement_map.py 一致',
     !kj || !kp ? ['找不到 K（liquid-glass.js 里的 var K = …，或 displacement_map.py 里的 K = …）']
       : kj[1] !== kp[1] ? [`liquid-glass.js 是 ${kj[1]}，displacement_map.py 是 ${kp[1]}`] : []);
+}
+
+// 版本号写在好几处：脚本文件头、脚本里的 version（真的那一份和替身那一份）、样式表文件头、仓库根的 package.json。
+// 发布时 CI 按脚本里的 version 打标签，其余几处对不上，装上的包就和标签对不上
+if (!argv.length) {
+  const vs = [];
+  const head = /v(\d+\.\d+\.\d+)/.exec(js.slice(0, 200)), chead = /v(\d+\.\d+\.\d+)/.exec(css.slice(0, 200));
+  vs.push(['liquid-glass.js 文件头', head && head[1]], ['liquid-glass.css 文件头', chead && chead[1]]);
+  for (const m of js.matchAll(/version:\s*'([^']+)'/g)) { vs.push(['liquid-glass.js 里的 version', m[1]]); }
+  try { vs.push(['package.json', JSON.parse(readFileSync(resolve(here, '..', '..', 'package.json'), 'utf8')).version]); } catch (e) { /* 拷进别的项目、没有 package.json */ }
+  const want = vs[2] && vs[2][1];
+  check('版本号各处一致（脚本、样式表、package.json）',
+    vs.length < 4 ? ['脚本里至少要有两处 version（真的一份、替身一份）'] : vs.filter(v => v[1] !== want).map(v => `${v[0]} 是 ${v[1]}，脚本里是 ${want}`));
+}
+
+// 服务端渲染：Node 里没有 window / document，require 与 import 都不能报错，拿到的是替身（supported: false，方法都在）
+if (!argv.length) {
+  const bad = [];
+  try {
+    const { createRequire } = await import('node:module');
+    const L = createRequire(import.meta.url)(resolve(assets, 'liquid-glass.js'));
+    if (!L || L.supported !== false || typeof L.init !== 'function' || L.init({}) !== L || L.mode() !== 'off') { bad.push('require 拿到的不是替身：' + JSON.stringify(L)); }
+    const M = (await import(pathToFileURL(resolve(assets, 'liquid-glass.mjs')).href)).default;
+    if (M !== L) { bad.push('import liquid-glass.mjs 拿到的和 require 的不是同一个'); }
+  } catch (e) { bad.push('报错：' + String(e).slice(0, 160)); }
+  check('服务端渲染时 require / import 不报错，拿到替身', bad);
 }
 
 console.log(`\n${pass} 项通过，${fails.length} 项失败`);

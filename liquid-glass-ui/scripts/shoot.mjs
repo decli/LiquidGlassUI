@@ -45,15 +45,16 @@ async function loadPlaywright() {
   throw new Error('找不到 Playwright：先 npm i -D playwright');
 }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
 function serve(dir) {
   return new Promise(ok => {
     const srv = createServer(async (req, res) => {
       const u = decodeURIComponent(new URL(req.url, 'http://x').pathname);
       const f = resolve(dir, '.' + u + (u.endsWith('/') ? 'index.html' : ''));
       if (!f.startsWith(dir + sep)) { res.writeHead(403).end(); return; }
-      try { res.writeHead(200, { 'content-type': TYPES[extname(f)] || 'application/octet-stream' }).end(await readFile(f)); }
-      catch (e) { res.writeHead(404).end(); }
+      let body;
+      try { body = await readFile(f); } catch (e) { res.writeHead(404).end(); return; }   // 先读再写头：读不到时头还没写，才能回 404
+      res.writeHead(200, { 'content-type': TYPES[extname(f)] || 'application/octet-stream' }).end(body);
     });
     srv.listen(0, '127.0.0.1', () => ok(srv));
   });
@@ -303,25 +304,37 @@ async function segCheck() {
       scale: [...seg.querySelectorAll(':scope > button')].map(x => +(x.style.scale || 1)) };
   }, SEG);
 
+  // 等到某个条件成立（最多 ms 毫秒）。动画的步长有上限，无头浏览器软件渲染折射时一帧 30–110ms，动画在墙钟上就慢下来——
+  // 固定等 600ms 有时差一点没到（滑块其实到了，只是晚到）。断言不放宽，只是不按固定时长等
+  const until = async (p, fn, arg, ms = 2500) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) { if (await p.evaluate(fn, arg)) { return true; } await p.waitForTimeout(40); }
+    return false;
+  };
+  // 浮起来了 / 落定了（不再飞、透镜落下、字的样子交还给页面）
+  const lifted = (p, sel) => until(p, s => { const seg = document.querySelector(s), T = seg.__lgT, l = seg.querySelector('.lg-lift');
+    return !!l && l.hasAttribute('data-up') && T.up >= 0.9; }, sel);
+  const landed = (p, sel) => until(p, s => { const seg = document.querySelector(s), T = seg.__lgT;
+    return !T.fly && T.up < 0.002 && !seg.hasAttribute('data-lg-ink') && !seg.hasAttribute('data-lg-drag'); }, sel);
   let o = await prep(), p = o.page, B = await at(p);
   const before = await at(p);
   await p.click(SEG + ' > button:nth-child(3)'); await p.waitForTimeout(800);
   const after = await at(p);
   if (before.some((b, i) => Math.abs(b.x - after[i].x) > 0.6)) { fail('换选中时旁边的项被挤动了（粗体没有预留宽度）'); }
   await p.click(SEG + ' > button:nth-child(1)'); await p.waitForTimeout(800);
-  await p.mouse.move(B[0].x, B[0].y); await p.mouse.down(); await p.waitForTimeout(450);
+  await p.mouse.move(B[0].x, B[0].y); await p.mouse.down(); await lifted(p, SEG);
   let s = await st(p);
   if (!s.lifted || s.up < 0.9 || !/url/.test(s.ref) || s.plate > 0.05) { fail('按住选中项，滑块应当浮起成一块正在折射的透镜：' + JSON.stringify(s)); }
   // 透镜底下的字被放大（iOS 26）：按住的那一项放大，别的项不动
   if (!(s.scale[0] > 1.08 && s.scale.slice(1).every(x => x === 1))) { fail('按住选中项：透镜底下那一项的字应当放大、别的项不动：' + JSON.stringify(s.scale)); }
-  await p.mouse.up(); await p.waitForTimeout(500);
+  await p.mouse.up(); await landed(p, SEG);
   s = await st(p);
   if (s.lifted || await sel(p) !== 0) { fail('只按一下不动：应当落回去、不换选中'); }
   if (s.scale.some(x => x !== 1)) { fail('透镜落下后字应当缩回原样：' + JSON.stringify(s.scale)); }
   await p.mouse.move(B[0].x, B[0].y); await p.mouse.down();
   await p.mouse.move(B[2].x, B[2].y, { steps: 20 }); await p.waitForTimeout(200);
   if ((await st(p)).near !== 2) { fail('拖动中离滑块最近的那一项应当标 data-lg-near'); }
-  await p.mouse.up(); await p.waitForTimeout(900);
+  await p.mouse.up(); await landed(p, SEG);
   s = await st(p);
   if (await sel(p) !== 2) { fail(`拖到第三项松手，应当选中第三项，实际是第 ${await sel(p) + 1} 项`); }
   if (s.lifted || s.fly || s.near !== -1) { fail('拖完落定后透镜应当落下、标记清掉：' + JSON.stringify(s)); }
@@ -343,8 +356,7 @@ async function segCheck() {
   s = await st(p);
   if (await sel(p) !== 1) { fail('往右轻甩 18px（离第一项还最近）应当走到下一项'); }
   if (!(Math.abs(s.st) > 0.002 && /scale/.test(s.transform))) { fail('甩出去时整条应当朝甩的方向形变：' + JSON.stringify(s)); }
-  await p.waitForTimeout(1000);
-  if ((await st(p)).transform) { fail('甩完应当回弹到原样'); }
+  if (!await until(p, s => !document.querySelector(s).style.transform, SEG)) { fail('甩完应当回弹到原样'); }
   await close(o, 'seg flick');
 
   o = await prep(); p = o.page; B = await at(p);
@@ -372,7 +384,7 @@ async function segCheck() {
   }, SEG);
   await p.mouse.move(B[3].x, B[3].y); await p.mouse.down(); await p.mouse.up(); await p.waitForTimeout(120);
   if (!(await st(p)).fly) { fail('点别的项：滑块应当浮着飞过去'); }
-  await p.waitForTimeout(1200);
+  await landed(p, SEG); await p.waitForTimeout(100);
   const trip = await p.evaluate(() => { const t = window.__trip; window.__trip = null; return t; });
   if (trip.lens > 0.1) { fail(`点别的项：飞的时候悬停透镜不该出来（--a 最高 ${trip.lens.toFixed(2)}），不然它先到终点，看着像选中跳过去`); }
   if (!(trip.near.indexOf(1) >= 0 && trip.near.indexOf(2) >= 0 && trip.near[trip.near.length - 1] === 3)) {
@@ -388,15 +400,15 @@ async function segCheck() {
 
   // 按住别的项（iOS 26：手指按在哪一项，玻璃就到哪一项底下）：还没松手就浮起、飞到手指下面；松手才交给页面去选
   o = await prep(); p = o.page; B = await at(p);
-  await p.mouse.move(B[2].x, B[2].y); await p.mouse.down(); await p.waitForTimeout(600);
-  s = await st(p);
-  const under = await p.evaluate(s => { const seg = document.querySelector(s), T = seg.__lgT, b = seg.querySelectorAll(':scope > button')[2];
+  await p.mouse.move(B[2].x, B[2].y); await p.mouse.down();
+  const under = await until(p, s => { const seg = document.querySelector(s), T = seg.__lgT, b = seg.querySelectorAll(':scope > button')[2];
     return Math.abs((T.l + T.r) / 2 - (b.offsetLeft + b.offsetWidth / 2)) < 2; }, SEG);
+  s = await st(p);
   if (!s.lifted || !under) { fail('按住没选中的项：滑块应当浮起、飞到手指下面：' + JSON.stringify({ lifted: s.lifted, under })); }
   if (await sel(p) !== 0) { fail('按住没选中的项、还没松手：不该已经换了选中'); }
   // 接着拖回第二项松手：从别的项起拖也行
   await p.mouse.move(B[1].x, B[1].y, { steps: 12 }); await p.waitForTimeout(200);
-  await p.mouse.up(); await p.waitForTimeout(1200);
+  await p.mouse.up(); await landed(p, SEG);
   s = await st(p);
   if (await sel(p) !== 1 || s.lifted) { fail(`从没选中的项拖到第二项松手：应当选中第二项、透镜落下，实际第 ${await sel(p) + 1} 项`); }
   await close(o, 'seg press other');
@@ -418,7 +430,7 @@ async function segCheck() {
     const tick = () => { if (window.__tbBad !== bad) { return; } const w = bs.map(b => +getComputedStyle(b).fontWeight); if (w[0] > 560 || w[2] < 600) { bad.push(w); } requestAnimationFrame(tick); };
     window.addEventListener('pointerup', () => requestAnimationFrame(tick), { once: true });
   });
-  await p.mouse.up(); await p.waitForTimeout(1000);
+  await p.mouse.up(); await landed(p, '.demo-tabbar');
   const tbad = await p.evaluate(() => { const b = window.__tbBad; window.__tbBad = null; return b; });
   const tsel = await p.evaluate(() => [...document.querySelectorAll('.demo-tabbar > button')].findIndex(x => x.getAttribute('aria-pressed') === 'true'));
   if (!tb || tsel !== 2) { fail('玻璃导航条：按住拖到第三项，透镜应当浮起并折射、松手选中第三项：' + JSON.stringify({ lifted: tb, sel: tsel })); }
@@ -579,6 +591,59 @@ async function scrollbarCheck() {
   if (failures.length === before) { console.log('  真滚动条（2 倍屏）：表格每一行点过、最后两行划过点过、筛短后、竖滚动条合法出现时、侧栏最后几项，滚动条都没闪'); }
 }
 
+/**
+ * 引入方式（integration.md §1）：别的项目怎么引都要能用、都不会坏。在演示页的地址下换上一段最小的页面（相对路径照样能找到脚本）：
+ *   · <head> 里 <link> + <script> 两行、不写内联脚本：用户选过「关闭」的，页面画出来之前档位就已经是 off / l0（不闪）
+ *   · 浏览器原生 ES 模块 import liquid-glass.mjs：拿到的就是全局那一个，滑块照样长出来
+ *   · <script> 和 import 各引一次：只跑一份（每个分段开关一个滑块）
+ *   · init({ presets: false }) 滑块全撤、init({ presets: true }) 长回来；init 返回自己
+ */
+async function importCheck() {
+  if (userUrl) { return; }
+  const fail = m => failures.push('引入方式：' + m);
+  const page = (head, tail) => `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><link rel="stylesheet" href="../liquid-glass.css">${head}</head>
+<body class="lg-page"><script>window.__early = [document.documentElement.getAttribute('data-lg-mode'), document.documentElement.getAttribute('data-lg-tier')];</script>
+<div class="lg-seg"><button type="button" aria-pressed="true">今天</button><button type="button" aria-pressed="false">本周</button><button type="button" aria-pressed="false">本月</button></div>
+<div class="lg-seg lg-seg--sm"><button type="button" aria-pressed="false">全部</button><button type="button" aria-pressed="true">完成</button></div>${tail}</body></html>`;
+  const thumbs = p => p.evaluate(() => [...document.querySelectorAll('.lg-seg')].map(s => s.querySelectorAll(':scope > .lg-thumb').length).join(''));
+  // 先打开同源下一个空白地址（演示页目录下不存在的文件），再写进测试页：不能在演示页上 setContent——那一页已经跑着一份 LiquidGlass
+  const run = async (name, html, saved, fn) => {
+    const ctx = await browser.newContext({ viewport: { width: 1000, height: 600 } });
+    const p = await ctx.newPage(), errors = [];
+    p.on('pageerror', e => errors.push(String(e)));
+    await p.goto(new URL('__blank__.html', base).href);
+    await p.evaluate(v => { try { if (v) { localStorage.setItem('lg.glass', v); } else { localStorage.removeItem('lg.glass'); } } catch (e) {} }, saved);
+    await p.setContent(html, { waitUntil: 'load' });
+    await p.waitForTimeout(500);
+    await fn(p);
+    if (errors.length) { fail(name + '：页面报错 ' + errors.slice(0, 3).join(' | ')); }
+    await ctx.close();
+  };
+  await run('<head> 两行', page('<script src="../liquid-glass.js"></script>', ''), 'off', async p => {
+    const r = await p.evaluate(() => ({ early: window.__early, supported: window.LiquidGlass && window.LiquidGlass.supported }));
+    if (!r.supported || r.early[0] !== 'off' || r.early[1] !== 'l0') { fail('<head> 里两行：选过「关闭」的，页面画出来之前档位应当已经是 off / l0，实际 ' + JSON.stringify(r)); }
+  });
+  await run('ES 模块', page('', '<script type="module">import LG from "../liquid-glass.mjs"; window.__esm = LG;</script>'), null, async p => {
+    const same = await p.evaluate(() => !!window.__esm && window.__esm === window.LiquidGlass && window.__esm.supported);
+    if (!same || await thumbs(p) !== '11') { fail('原生 ES 模块：应当拿到全局那一个、滑块照样长出来，实际 ' + JSON.stringify({ same, thumbs: await thumbs(p) })); }
+  });
+  await run('引两次', page('<script src="../liquid-glass.js"></script>', '<script type="module">import LG from "../liquid-glass.mjs"; window.__esm = LG;</script>'), null, async p => {
+    const t = await thumbs(p), same = await p.evaluate(() => window.__esm === window.LiquidGlass);
+    if (t !== '11' || !same) { fail('<script> 和 import 各引一次：应当只跑一份，实际滑块 ' + t + '、同一个 ' + same); }
+  });
+  await run('init', page('<script src="../liquid-glass.js"></script>', ''), null, async p => {
+    const r = await p.evaluate(async () => {
+      const fr = () => new Promise(ok => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const L = window.LiquidGlass, n = () => document.querySelectorAll('.lg-seg > .lg-thumb').length;
+      const chain = L.init({ presets: false }) === L; await fr(); const off = n();
+      L.init({ presets: true }); await fr(); const on = n();
+      return { chain, off, on };
+    });
+    if (!r.chain || r.off !== 0 || r.on !== 2) { fail('init({ presets: false }) 应当撤掉滑块、再 true 长回来，并返回自己，实际 ' + JSON.stringify(r)); }
+  });
+  console.log('  引入方式：<head> 两行（不闪）、原生 ES 模块、引两次只跑一份、init 换配置都对');
+}
+
 if (!checkOnly) { await mkdir(outDir, { recursive: true }); }
 
 /**
@@ -675,6 +740,7 @@ if (userUrl) {
   await segCheck();
   await overflowCheck();
   await scrollbarCheck();
+  await importCheck();
 
   if (!checkOnly) {
     // ── 2 图集 ──
