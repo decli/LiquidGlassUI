@@ -642,9 +642,11 @@
 
   /**
    * 装透镜 / 滑块的容器若是滚动容器（overflow: auto / scroll），记下内容的范围：画的时候整块不许伸出去。
-   * 伸出去一个像素，滚动尺寸就被撑大，滚动条闪一下（表格最后一行：透镜回弹往下多冲 1px，竖滚动条一出来又挤出横滚动条）。
+   * 伸出去一点，滚动尺寸就被撑大，滚动条闪一下；竖滚动条一出来占掉宽度，表格横向又溢出，两条互相撑着不走。
    * 量之前先把自己放进去的玻璃藏起来：内容变短时它们还停在原处（表格筛完只剩两行，透镜还在原来第十行那儿），
    * 带着它们量，量到的就是被它们撑大的范围。
+   * 再往里让 1px：scrollWidth / scrollHeight 是取过整的（内容其实 439.69px，读出来 440），贴着它画，
+   * 在 2 倍屏上多出的那 0.3px 就是一整个物理像素，Chrome 照样算溢出。让 1px 以后一定在真实的内容边以内。
    */
   var OWN_RE = /(^|\s)lg-(lens|thumb|lift)(\s|$)/;
   function scrollBox(el) {
@@ -654,19 +656,38 @@
     for (i = 0; i < k.length; i++) {
       if (OWN_RE.test(k[i].getAttribute('class') || '')) { hid.push([k[i], k[i].style.display]); k[i].style.display = 'none'; }
     }
-    var box = { w: el.scrollWidth, h: el.scrollHeight };
+    // fit：内容横向放得下（不横着滚）。这时透镜的宽度再按面板内容区写一道上限（liveWidth）
+    var box = { w: el.scrollWidth - 1, h: el.scrollHeight - 1, fit: el.scrollWidth <= el.clientWidth };
     for (i = 0; i < hid.length; i++) { hid[i][0].style.display = hid[i][1]; }
     return box;
   }
-  /** 把以 (x, y) 为左上角、w × h、以中心缩放 (sx, sy) 的一块挪回 box 里面；返回挪过的左上角 */
+  /**
+   * 透镜 / 滑块的宽度：内容横向放得下时写成 min(算好的宽度, 面板内容区宽度 − 左边的位置 − 1px)。
+   * 竖滚动条一冒出来，内容区窄了 15px、整行也跟着窄了；脚本要到下一帧才重量，这一两帧里透镜还是原来那么宽，
+   * 横向就溢出、横滚动条闪一下。写成 min()，同一次排版里透镜就跟着变窄。以中心缩放 s 时右沿 = x + w/2 + w·s/2。
+   */
+  var CSS_MIN = CSSx.supports('width', 'min(1px, 2%)');
+  function liveWidth(box, x, w, s) {
+    var px = w.toFixed(2) + 'px';
+    if (!box || !box.fit || !CSS_MIN) { return px; }
+    return 'min(' + px + ', calc((100% - ' + (x + 1).toFixed(2) + 'px) * ' + (2 / (1 + s)).toFixed(4) + '))';
+  }
+  /**
+   * 把以 (x, y) 为左上角、w × h、以中心缩放 (sx, sy) 的一块关进 box 里面；返回 [左上角 x, y, 宽, 高]。
+   * 比 box 还大时先把宽高收到放得下（整行宽的透镜正好和表格一样宽，稍一放大就没地方挪），再挪；
+   * 收的是宽高、不动缩放——会折射的东西一缩放，透过它的内容就被重采样得发糊
+   */
   function keepIn(box, x, y, w, h, sx, sy) {
-    if (!box) { return [x, y]; }
-    var cx = x + w / 2, cy = y + h / 2, hw = w * sx / 2, hh = h * sy / 2;
+    if (!box) { return [x, y, w, h]; }
+    var cx = x + w / 2, cy = y + h / 2;
+    if (w * sx > box.w) { w = Math.max(0, box.w) / sx; }
+    if (h * sy > box.h) { h = Math.max(0, box.h) / sy; }
+    var hw = w * sx / 2, hh = h * sy / 2;
     if (cx + hw > box.w) { cx = box.w - hw; }
     if (cx - hw < 0) { cx = hw; }
     if (cy + hh > box.h) { cy = box.h - hh; }
     if (cy - hh < 0) { cy = hh; }
-    return [cx - w / 2, cy - h / 2];
+    return [cx - w / 2, cy - h / 2, w, h];
   }
 
   function isOn(el) {
@@ -739,9 +760,12 @@
     var L = {
       surf: surf, cfg: cfg, el: null, ref: null, F: null,
       x: 0, y: 0, w: 0, h: 0, vx: 0, vy: 0, vw: 0, vh: 0, tx: 0, ty: 0, tw: 0, th: 0,
-      a: 0, va: 0, ta: 0, p: 0, vp: 0, tp: 0, px: 0.5, py: 0.5,
+      a: 0, va: 0, ta: 0, p: 0, vp: 0, tp: 0, px: 0.5, py: 0.5, pw: null, ph: null,
       cur: null, items: [], rad: null, settled: false, still: false, hover: false, focus: false, offT: 0, clip: null
     };
+    // 面板的内容区一变（包括滚动条冒出来、收回去：内容区跟着窄 15px），透镜马上按新的范围重量、重新对齐——
+    // 不然竖滚动条一出来表格变窄、透镜还是原来那么宽，横向又溢出，两条滚动条互相撑着不走
+    if (ro) { ro.observe(surf); }
     L.step = function (dt) { return lensStep(L, dt); };
     L.paint = function () { lensPaint(L); };
     lenses.push(L);
@@ -856,21 +880,21 @@
     var sY = under ? 0 : Math.min(0.12, Math.abs(L.vy) / 3800), sX = under ? 0 : Math.min(0.08, Math.abs(L.vx) / 5200);
     var sx = (1 + sX) / (1 + 0.6 * sY), sy = (1 + sY) / (1 + 0.6 * sX);
     // 按下：横向鼓、纵向压，松手回弹像果冻。鼓多少按像素封顶（≤ 12px）：宽的项按比例鼓，一按就顶出面板。
-    // 整行不鼓、往里收一点（≤ 8px × 3px）——行占满整张表，往外鼓就被表格裁掉、圆角也没了
+    // 整行不鼓、往里收一点（≤ 8px × 3px）——行占满整张表，往外鼓就被表格裁掉、圆角也没了。
+    // 松手的回弹也不许鼓：按压量会冲过头到负的（约 −0.06），照算的话整行透镜比行还大半个像素，最后一行就把滚动条顶出来
     var bw = Math.max(1, L.w), bh = Math.max(1, L.h);
-    if (under) { sx *= 1 - Math.min(0.035, 8 / bw) * p; sy *= 1 - Math.min(0.06, 3 / bh) * p; }
+    if (under) { sx *= 1 - Math.min(0.035, 8 / bw) * Math.max(0, p); sy *= 1 - Math.min(0.06, 3 / bh) * Math.max(0, p); }
     else { sx *= 1 + Math.min(0.06, 12 / bw) * p; sy *= 1 - 0.09 * p; }
     var s0 = under ? 1 : 0.86 + 0.14 * a;                 // 出现：从小一圈长出来
     var par = !under && mode === 'full';
     var ox = par ? (L.px - 0.5) * 4 * a : 0, oy = par ? (L.py - 0.5) * 2 * a : 0;   // 跟手视差（「精简」不跟）
-    el.style.width = Math.max(0, L.w).toFixed(2) + 'px';
-    el.style.height = Math.max(0, L.h).toFixed(2) + 'px';
-    el.style.borderRadius = (L.rad != null ? L.rad : Math.max(0, Math.min(L.w, L.h)) / 2).toFixed(2) + 'px';
-    var at = keepIn(L.clip, L.x + ox, L.y + oy, L.w, L.h, sx * s0, sy * s0);
-    if (!L.ta && a < 0.002) {
-      // 撤完了：缩成 0 × 0 停在左上角。看不见的透镜也占着滚动范围——内容一变短，它就把滚动条撑出来
-      el.style.width = el.style.height = '0px'; at = [0, 0]; sx = sy = s0 = 1;
-    }
+    var at = keepIn(L.clip, L.x + ox, L.y + oy, Math.max(0, L.w), Math.max(0, L.h), sx * s0, sy * s0);
+    // 撤完了：缩成 0 × 0 停在左上角。看不见的透镜也占着滚动范围——内容一变短，它就把滚动条撑出来
+    if (!L.ta && a < 0.002) { at = [0, 0, 0, 0]; sx = sy = s0 = 1; }
+    L.pw = at[2]; L.ph = at[3];
+    el.style.width = liveWidth(L.clip, at[0], at[2], sx * s0);
+    el.style.height = at[3].toFixed(2) + 'px';
+    el.style.borderRadius = (L.rad != null ? L.rad : Math.min(at[2], at[3]) / 2).toFixed(2) + 'px';
     el.style.transform = 'translate3d(' + at[0].toFixed(2) + 'px,' + at[1].toFixed(2) + 'px,0) scale('
       + (sx * s0).toFixed(4) + ',' + (sy * s0).toFixed(4) + ')';
     el.style.setProperty('--a', a.toFixed(3));
@@ -905,7 +929,7 @@
   function lensMap(L) {
     if (!L.ref || !refracting() || L.el.hasAttribute('data-onsel') || isolated(L.surf)) { return; }
     if (!L.F) { L.F = newFilter(0.06); L.ref.style.setProperty('--lg-ref', 'url(#' + L.F.id + ')'); }
-    var w = Math.round(L.w), h = Math.round(L.h);
+    var w = Math.round(L.pw != null ? L.pw : L.w), h = Math.round(L.ph != null ? L.ph : L.h);   // 画出来的尺寸（可能被关进滚动范围时收过）
     if (w < 8 || h < 8) { return; }
     var r = L.rad != null ? Math.min(L.rad, h / 2) : h / 2, bez = Math.min(12, h * 0.32);
     setGeom(L.F, w, h, r, { bezel: bez, depth: bez * K, blur: Math.max(0.5, h * 0.02), disp: 0.06, scatter: 0.05 });
@@ -971,7 +995,11 @@
   function syncLenses() {
     for (var i = lenses.length - 1; i >= 0; i--) {
       var L = lenses[i];
-      if (!doc.body.contains(L.surf)) { if (L.F) { dropFilter(L.F); } L.surf.__lgL = null; lenses.splice(i, 1); continue; }
+      if (!doc.body.contains(L.surf)) {
+        if (L.F) { dropFilter(L.F); }
+        if (ro) { ro.unobserve(L.surf); }
+        L.surf.__lgL = null; lenses.splice(i, 1); continue;
+      }
       if (L.el && L.clip) { L.clip = scrollBox(L.surf); L.paint(); }   // 内容变了：按新的范围再关一次（淡出中的也算）
       if (!L.ta || !L.cur) { continue; }
       if (!L.el || L.el.parentNode !== L.surf || !L.surf.contains(L.cur) || !visible(L.cur)) {
@@ -1047,7 +1075,8 @@
     for (i = 0; i < list.length; i++) { if (isOn(list[i]) && visible(list[i])) { cur = list[i]; break; } }
     var jump = T.a < 0.05 || calm() || (T.resized && surf.offsetWidth !== T.w0);
     T.resized = false; T.w0 = surf.offsetWidth;
-    T.clip = scrollBox(surf);
+    var clip = scrollBox(surf);
+    if (!clip !== !T.clip || (clip && (clip.w !== T.clip.w || clip.h !== T.clip.h))) { T.clip = clip; thumbPaint(T); }   // 范围变了（滚动条进出）：当场按新的关一次
     if (T.zS) { T.zOld = true; animate(T); }         // 排版可能变了：玻璃底下的字下一帧重新量（不先复原，免得闪一帧）
     if (T.drag) {                                    // 按着的时候滑块听手指的；整片重画了就作废，按页面现在的选中落定
       for (i = 0; i < T.drag.S.length; i++) { if (!surf.contains(T.drag.S[i].el)) { dragStop(T); break; } }
@@ -1147,14 +1176,15 @@
       segInk(T, up);
     }
     var rad = T.rad != null ? T.rad : h / 2;
-    var key = T.l.toFixed(2) + '|' + T.t.toFixed(2) + '|' + w.toFixed(2) + '|' + h.toFixed(2) + '|' + op.toFixed(3) + '|'
+    var at = keepIn(T.clip, T.l, T.t, w, h, sx, sy);      // 滚动容器里（侧栏菜单、命令面板列表）：回弹不许把滚动尺寸撑大
+    w = at[2]; h = at[3];
+    var key = at[0].toFixed(2) + '|' + at[1].toFixed(2) + '|' + w.toFixed(2) + '|' + h.toFixed(2) + '|' + op.toFixed(3) + '|'
       + sx.toFixed(4) + '|' + sy.toFixed(4) + '|' + rad;
     if (key === T.painted) { return; }
     T.painted = key;
-    T.el.style.width = w.toFixed(2) + 'px';
+    T.el.style.width = liveWidth(T.clip, at[0], w, sx);
     T.el.style.height = h.toFixed(2) + 'px';
     T.el.style.borderRadius = Math.min(rad, h / 2, w / 2).toFixed(2) + 'px';
-    var at = keepIn(T.clip, T.l, T.t, w, h, sx, sy);      // 滚动容器里（侧栏菜单、命令面板列表）：回弹不许把滚动尺寸撑大
     T.el.style.transform = 'translate3d(' + at[0].toFixed(2) + 'px,' + at[1].toFixed(2) + 'px,0) scale(' + sx.toFixed(4) + ',' + sy.toFixed(4) + ')';
     T.el.style.opacity = op.toFixed(3);
   }

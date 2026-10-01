@@ -497,6 +497,88 @@ async function overflowCheck() {
   await close(o, 'overflow');
 }
 
+/**
+ * 真滚动条下的滚动条校验（pitfalls.md #36、#38、#41）。上面那一套在默认的无头浏览器里跑：滚动条是隐藏的、不占位置，
+ * 缩放 1 倍——亚像素的溢出被舍掉、竖滚动条也挤不出横滚动条，Mac 视网膜屏上「点一下表格最后一行滚动条就闪」在那里看不见。
+ * 这里另开一个浏览器：滚动条照常画、占位置（--hide-scrollbars 去掉），真的按 2 倍渲染（--force-device-scale-factor，
+ * 不是 deviceScaleFactor 那种模拟）。用 ResizeObserver（排版之后、绘制之前）看外框内容区有没有变窄 / 变矮——变了就是滚动条真的画出来了。
+ *   · 表格（全部、筛成两行）：每一行点一下（短按、长按、点在行里不同位置），最后两行之间来回划、点
+ *   · 自锁：停在最后一行时让竖滚动条合法地出来（给外框限高），透镜要在同一次排版里跟着变窄，横滚动条一帧都不许出
+ *   · 侧栏菜单最后几项来回划
+ */
+async function scrollbarCheck() {
+  let b2;
+  try {
+    b2 = await chromium.launch({ ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+      ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--force-device-scale-factor=2'] });
+  } catch (e) { console.log('  （真滚动条校验跳过：' + String(e).slice(0, 80) + '）'); return; }
+  const fail = m => failures.push('真滚动条（2 倍屏）：' + m), before = failures.length;
+  const ctx = await b2.newContext({ viewport: { width: 1440, height: 900 } });
+  const p = await ctx.newPage();
+  await p.addInitScript(k => { try { localStorage.setItem(k, 'full'); } catch (e) {} }, modeKey);
+  await p.goto(base);
+  await p.waitForTimeout(700);
+  const watch = sel => p.evaluate(sel => {
+    const w = document.querySelector(sel), ev = window.__sbEv = [], cw = w.clientWidth, ch = w.clientHeight;
+    if (window.__sbRo) { window.__sbRo.disconnect(); }
+    window.__sbRo = new ResizeObserver(() => { if (w.clientWidth !== cw || w.clientHeight !== ch) { ev.push([w.clientWidth - cw, w.clientHeight - ch]); } });
+    window.__sbRo.observe(w);
+    return w.scrollWidth > w.clientWidth || w.scrollHeight > w.clientHeight;
+  }, sel);
+  const seen = () => p.evaluate(() => window.__sbEv.length);
+  if (await p.locator('.lg-table-wrap').count()) {
+    for (const filter of ['', 'warn']) {
+      const fb = p.locator(`#filter button[data-filter="${filter}"]`);
+      if (await fb.count()) { await fb.click(); await p.waitForTimeout(400); } else if (filter) { continue; }
+      await p.locator('.lg-table-wrap').evaluate(e => e.scrollIntoView({ block: 'center' })); await p.waitForTimeout(250);
+      if (await watch('.lg-table-wrap')) { fail(`表格（${filter || '全部'}）还没动就有滚动条`); continue; }
+      const rows = p.locator('.lg-table tbody tr'), n = await rows.count();
+      for (let i = 0; i < n; i++) {
+        const r = await rows.nth(i).boundingBox(), fx = [0.1, 0.5, 0.9][i % 3], fy = [0.2, 0.5, 0.85][(i + 1) % 3];
+        await p.mouse.move(r.x + r.width * fx, r.y + r.height * fy, { steps: 2 }); await p.waitForTimeout(120);
+        await p.mouse.down(); await p.waitForTimeout(i % 2 ? 280 : 50); await p.mouse.up(); await p.waitForTimeout(160);
+      }
+      const last = await rows.nth(n - 1).boundingBox(), prev = n > 1 ? await rows.nth(n - 2).boundingBox() : last;
+      for (let k = 0; k < 3; k++) {
+        await p.mouse.move(prev.x + prev.width * 0.3, prev.y + prev.height * 0.5, { steps: 3 }); await p.waitForTimeout(150);
+        await p.mouse.move(last.x + last.width * (0.2 + k * 0.3), last.y + last.height * 0.95, { steps: 3 }); await p.waitForTimeout(260);
+        await p.mouse.down(); await p.waitForTimeout(90); await p.mouse.up(); await p.waitForTimeout(200);
+      }
+      await p.mouse.move(last.x + 30, last.y + last.height + 70, { steps: 3 }); await p.waitForTimeout(500);
+      const k = await seen();
+      if (k) { fail(`表格（${filter || '全部'}）点每一行、在最后两行之间划和点：滚动条闪了 ${k} 次`); }
+    }
+    const fb = p.locator('#filter button[data-filter=""]');
+    if (await fb.count()) { await fb.click(); await p.waitForTimeout(400); }
+    const rows = p.locator('.lg-table tbody tr'), n = await rows.count(), last = await rows.nth(n - 1).boundingBox();
+    await p.mouse.move(last.x + last.width * 0.6, last.y + last.height * 0.5, { steps: 3 }); await p.waitForTimeout(500);
+    const r = await p.evaluate(async () => {
+      const w = document.querySelector('.lg-table-wrap'), next = () => new Promise(ok => requestAnimationFrame(ok));
+      let h = 0;
+      w.style.maxHeight = (w.clientHeight - 20) + 'px';
+      for (let i = 0; i < 30; i++) { await next(); if (w.scrollWidth > w.clientWidth) { h++; } }
+      w.style.maxHeight = '';
+      for (let i = 0; i < 30; i++) { await next(); }
+      return { h, after: w.scrollWidth > w.clientWidth || w.scrollHeight > w.clientHeight };
+    });
+    if (r.h || r.after) { fail(`自锁：竖滚动条合法出现时，透镜有 ${r.h} 帧比表格宽、撑出横滚动条${r.after ? '，拿掉以后滚动条也没退' : ''}`); }
+  }
+  if (await p.locator('.lg-nav').count()) {
+    await watch('.lg-nav');
+    const it = p.locator('.lg-nav-plate:not([hidden]) .lg-nav-item'), n = await it.count();
+    for (let k = 0; k < 3 && n > 1; k++) {
+      for (const i of [n - 2, n - 1]) {
+        const r = await it.nth(i).boundingBox();
+        await p.mouse.move(r.x + r.width * [0.2, 0.8][k % 2], r.y + r.height * [0.3, 0.9][k % 2], { steps: 3 }); await p.waitForTimeout(200);
+      }
+    }
+    const k = await seen();
+    if (k) { fail(`侧栏菜单最后几项来回划：滚动条闪了 ${k} 次`); }
+  }
+  await ctx.close(); await b2.close();
+  if (failures.length === before) { console.log('  真滚动条（2 倍屏）：表格每一行点过、最后两行划过点过、筛短后、竖滚动条合法出现时、侧栏最后几项，滚动条都没闪'); }
+}
+
 if (!checkOnly) { await mkdir(outDir, { recursive: true }); }
 
 /**
@@ -592,6 +674,7 @@ if (userUrl) {
   await refractCheck();
   await segCheck();
   await overflowCheck();
+  await scrollbarCheck();
 
   if (!checkOnly) {
     // ── 2 图集 ──

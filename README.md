@@ -25,7 +25,7 @@
   跟随系统的「减少动态效果」「减少透明度」「增强对比度」。
 - **HDR 高光**：HDR 屏上玻璃上沿一道比页面白更亮的光（16 位 PNG + cICP）。
 - **浅色 / 深色 / 跟随系统**，玻璃提示、浮动提示、命令面板、弹出菜单、表格、表单一整套组件。
-- **完整的方法**：设计规范、技术原理、40 个踩坑、每轮评审的设计决策、静态检查与截图校验脚本。
+- **完整的方法**：设计规范、技术原理、41 个踩坑、每轮评审的设计决策、静态检查与截图校验脚本。
   第二版（1.1.0）对照 [ZeppBridge](https://github.com/lingcang728/ZeppBridge/tree/v3) 照 iOS 26 逐帧重做的玻璃改了折射模型、加上了按住浮起，经过见 `references/design-decisions.md` 第八轮。
 
 ## 在网页项目里用
@@ -65,6 +65,9 @@
 python3 -m http.server -d liquid-glass-ui/assets 8000
 # 打开 http://localhost:8000/demo/
 ```
+
+`git pull` 之后看新效果要**强制刷新**（Mac `⌘ Shift R`，Windows `Ctrl Shift R`）：这个简易服务器不发缓存头，
+浏览器会在一段时间里接着用旧的 `liquid-glass.js` / `.css`，普通刷新看到的还是上一版。
 
 ## 作为 Claude skill 用
 
@@ -124,7 +127,8 @@ tools/package_skill.py           把 liquid-glass-ui/ 打成 .skill（与官方 
 ```bash
 node liquid-glass-ui/scripts/check.mjs         # ES5、不改 class、令牌一致、类名没拼错
 node liquid-glass-ui/scripts/shoot.mjs         # 拍演示页整套截图，并验：三档分得开、每个能点的元素悬停都有反馈、所有玻璃同一种材质、
-                                               # 玻璃正中逐像素不动而外圈在弯、分段开关与玻璃导航条按住 / 拖 / 甩 / 橡皮筋都对（需要 Playwright）
+                                               # 玻璃正中逐像素不动而外圈在弯、分段开关与玻璃导航条按住 / 拖 / 甩 / 橡皮筋都对、
+                                               # 真滚动条 + 2 倍屏下点表格每一行滚动条都不闪（需要 Playwright）
 python3 liquid-glass-ui/scripts/displacement_map.py --selftest   # 位移曲线不折叠、九宫格拼回去和整张一样
 python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liquid-glass.js
 ```
