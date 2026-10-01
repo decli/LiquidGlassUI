@@ -38,7 +38,7 @@ description: >-
 | `references/design-spec.md` | 定稿的设计规范：令牌、每个组件的尺寸、动效参数、三档定义 | 做任何视觉决定时 |
 | `references/integration.md` | 接入指南：组件类、data 属性、配置、接口、框架、CSP、检查清单 | 接进项目时 |
 | `references/principles.md` | 技术原理：玻璃怎么搭、折射的位移曲线与滤镜链、九宫格、HDR、弹簧、分段开关的浮起与拖动、分档、背景根 | 改算法或解释原理时 |
-| `references/pitfalls.md` | 41 个「不报错、只是静静地坏掉」的坑，按症状查 | 出现诡异现象时先查 |
+| `references/pitfalls.md` | 43 个「不报错、只是静静地坏掉」的坑，按症状查 | 出现诡异现象时先查 |
 | `references/design-decisions.md` | 每轮评审指出了什么、为什么这样改 | 用户想改风格、或你想「改回」某个做法之前 |
 
 ## 工作流程
@@ -55,7 +55,7 @@ description: >-
 1. 引入，按项目的形态选一种（`references/integration.md` §1）：
    - **普通页面 / 服务端模板**：把 `assets/liquid-glass.css`、`assets/liquid-glass.js` 拷进项目静态目录（保留文件头注释），
      `<head>` 里一个 `<link>`、一个 `<script>`——脚本放 `<head>` 时自己会在页面画出来之前写好档位，不用再加内联脚本。
-   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.1.0`（用户能访问这个仓库时），
+   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.2.0`（用户能访问这个仓库时），
      入口里 `import 'liquid-glass-ui/liquid-glass.css'` + `import LiquidGlass from 'liquid-glass-ui'`；访问不了就把 assets 下四个文件拷进项目，
      照样 import 相对路径。要改配置在 import 之后调 `LiquidGlass.init({ … })`。服务端渲染时 import 不会报错，不用 `typeof window` 判断。
 2. 不要在组件里初始化、也不要在路由切换后调什么：脚本用 `MutationObserver` 自己发现变化。`init()` 整页一份，只在启动时调。
@@ -119,7 +119,9 @@ node scripts/shoot.mjs --url http://localhost:8080/ [--key 你的档位存储键
   粘在能滚的内容底部（integration.md §7.3）；无头截图里矮条看着没模糊是无头浏览器的问题（pitfalls.md #34），要在实机上看。
 - **「要 iOS 26 标签栏那种按住浮起、能拖的选项」**：直接用 `.lg-seg`（或 `data-lg-slider` + `data-lg-kind="seg"`），已经带了；
   页面的点击处理要能处理 `element.click()`（拖完松手脚本替用户点一下落到的那一项），见 integration.md §7.3。
-- **「要一个静态的、不跑脚本的折射」**：`python3 scripts/displacement_map.py --w 宽 --h 高 --svg` 生成一段滤镜贴进页面（仅 Chromium，元素尺寸必须固定）。
+- **「要一块像凸透镜的玻璃」**（可拖的水滴、旋钮、放大镜这类一小块独立的玻璃）：`data-lg-refract="lens"`——整块连续地弯，
+  不会像「外面一圈在弯、里面一块平」两个椭圆；面板、菜单这种大块的玻璃照旧用默认（pitfalls.md #43）。
+- **「要一个静态的、不跑脚本的折射」**：`python3 scripts/displacement_map.py --w 宽 --h 高 --svg`（凸透镜加 `--lens`）生成一段滤镜贴进页面（仅 Chromium，元素尺寸必须固定）。
 - **「为什么是这个样子 / 能不能改回 X」**：先看 `references/design-decisions.md`，把当时的理由告诉用户，再一起决定。
 
 ## 交付时告诉用户

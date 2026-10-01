@@ -1,5 +1,5 @@
 /*!
- * Liquid Glass UI —— 样式 v1.1.0
+ * Liquid Glass UI —— 样式 v1.2.0
  *
  * 一套照 Apple Liquid Glass 做的网页材质与组件：控制层（侧栏、页头胶囊、弹出层、工具条、提示）是玻璃，
  * 内容层（卡片、表格）是不透光的「实心厚玻璃」。动效与折射由同目录的 liquid-glass.js 驱动，
@@ -870,8 +870,10 @@ html:not([data-lg-lens]) .lg-icon-btn:hover, html:not([data-lg-lens]) .lg-pill-b
    外层只平移；里面两层：折射层只淡入淡出、绝不缩放（一缩放，透过它的东西就被重采样得发糊），
    边（描边 + 浮起的影子 + 左上 / 右下两道斜对角高光）浮起 / 落下时从平胶囊的大小长出来。
    不浮着的时候 visibility: hidden——透明度为 0 的 backdrop-filter 照样每帧要算 */
+/* z 5：压在容器自己的高光环（.lg-glass::after，z 3）和 HDR 高光（z 4）上面。和高光环同层的话，后画的高光环盖在透镜上、
+   不被折射，透镜里就透出一道整条的边——两圈边框叠在一起。压在上面以后，那道边落在透镜的斜面里，往里取样采不到它，自然消失 */
 .lg-lift {
-  position: absolute; left: 0; top: 0; width: 0; height: 0; margin: 0 !important; z-index: 3;
+  position: absolute; left: 0; top: 0; width: 0; height: 0; margin: 0 !important; z-index: 5;
   pointer-events: none; border-radius: 999px; visibility: hidden; will-change: transform;
 }
 .lg-lift[data-up] { visibility: visible; }

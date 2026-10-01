@@ -38,6 +38,8 @@ export interface RefractPreset {
   disp?: number;
   /** 边上乳白的浓度，缺省 0.05 */
   scatter?: number;
+  /** 剖面：2 = 玻璃板（缺省，边上弯、正中平）；3 = 凸透镜那种三次剖面（配合 bezel = 短边 / 2，整块连续地弯） */
+  power?: 2 | 3;
 }
 /** HDR 高光预设 */
 export interface HdrPreset {

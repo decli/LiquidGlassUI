@@ -253,32 +253,73 @@ async function regionDiff(a, b, ix, iy) {
 }
 
 /**
- * 折射校验（演示页的那颗玻璃）：同一块玻璃、同一条滤镜链，只把折射那一步换成什么都不做，前后各拍一张。
- *   · 正中（离边超过边宽、离两端超过圆角）必须逐像素一样——中间一个像素都不重采样；
- *   · 外圈必须有相当一部分像素变了——边上确实在放大、弯折。
+ * 折射校验（演示页的那颗玻璃）：同一块玻璃、同一条滤镜链，只把折射那一步换成什么都不做，前后各拍一张。两种剖面各验一遍：
+ *   · 默认的玻璃板（data-lg-refract="22 10"）：正中（离边超过边宽、离两端超过圆角）必须逐像素一样——中间一个像素都不重采样；
+ *     外圈必须有相当一部分像素变了——边上确实在放大、弯折。
+ *   · 凸透镜（data-lg-refract="lens"，演示页现在用的）：中线附近一条带肉眼看不出变化（最大差 ≤ 8）；
+ *     离边 22–32px 那一圈（玻璃板在这里是平的）也在弯（≥ 5% 的像素变了）——整块连续地弯，没有「外面一圈弯、里面一块平」。
+ * 换剖面用 LiquidGlass.init() 整套重来（它会重读 data-lg-refract）。
  */
 async function refractCheck() {
   const o = await open({ mode: 'full', dpr: 2 });
   const p = o.page;
-  const g = await p.evaluate(() => {
-    const d = document.getElementById('drop');
-    d.style.transform = 'translate(150px,34px)';
-    return { on: d.hasAttribute('data-lg-refract-on'), bezel: parseFloat(d.getAttribute('data-lg-refract')) || 16,
-      radius: parseFloat(getComputedStyle(d).borderTopLeftRadius) || 0 };
-  });
-  if (!g.on) { failures.push('折射校验：演示页的玻璃没开折射（完整档、Chromium 下应当开）'); await close(o, 'refract'); return; }
-  await p.locator('#lab').scrollIntoViewIfNeeded();
-  await p.waitForTimeout(500);
-  const clip = await p.locator('#drop').boundingBox();
-  const on = await p.screenshot({ clip });
-  await p.evaluate(() => document.getElementById('drop').style.setProperty('--lg-ref', 'blur(0px)'));
-  await p.waitForTimeout(300);
-  const off = await p.screenshot({ clip });
-  const r = await regionDiff(on, off, Math.ceil((g.radius + 3) * 2), Math.ceil((g.bezel + 3) * 2));
-  console.log(`  折射：正中 ${(r.center * 100).toFixed(3)}% 的像素不同（最大差 ${r.centerMax}），外圈 ${(r.edge * 100).toFixed(1)}% 在弯`);
+  const shoot = async (attr, pos) => {
+    await p.evaluate(([a, v]) => {
+      const d = document.getElementById('drop');
+      d.style.removeProperty('--lg-ref'); d.setAttribute('data-lg-refract', a); d.style.transform = 'translate(' + v + ')';
+      window.LiquidGlass.init({});
+    }, [attr, pos]);
+    await p.locator('#lab').scrollIntoViewIfNeeded();
+    await p.waitForTimeout(600);
+    const g = await p.evaluate(() => {
+      const d = document.getElementById('drop');
+      return { on: d.hasAttribute('data-lg-refract-on'), radius: parseFloat(getComputedStyle(d).borderTopLeftRadius) || 0, w: d.offsetWidth, h: d.offsetHeight };
+    });
+    const clip = await p.locator('#drop').boundingBox();
+    const on = await p.screenshot({ clip });
+    await p.evaluate(() => document.getElementById('drop').style.setProperty('--lg-ref', 'blur(0px)'));
+    await p.waitForTimeout(300);
+    return { g, on, off: await p.screenshot({ clip }) };
+  };
+  let s = await shoot('22 10', '150px,34px');
+  if (!s.g.on) { failures.push('折射校验：演示页的玻璃没开折射（完整档、Chromium 下应当开）'); await close(o, 'refract'); return; }
+  const r = await regionDiff(s.on, s.off, Math.ceil((s.g.radius + 3) * 2), Math.ceil((22 + 3) * 2));
+  console.log(`  折射（玻璃板）：正中 ${(r.center * 100).toFixed(3)}% 的像素不同（最大差 ${r.centerMax}），外圈 ${(r.edge * 100).toFixed(1)}% 在弯`);
   if (r.center > 0.001 || r.centerMax > 6) { failures.push(`折射校验：玻璃正中被重采样了（${(r.center * 100).toFixed(3)}% 的像素和不折射时不同）`); }
   if (r.edge < 0.03) { failures.push(`折射校验：外圈只有 ${(r.edge * 100).toFixed(1)}% 的像素变了，看不出折射`); }
+  // 凸透镜：压在两行字上（横着的笔画才看得出上下方向的弯折）
+  s = await shoot('lens', '46px,8px');
+  const L = await bandDiff(s.on, s.off, s.g.w, [[s.g.h / 2 + 8, s.g.h / 2 - 8, s.g.w - s.g.h / 2 - 8, s.g.h / 2 + 8, 3],
+    [s.g.h / 2 + 8, 22, s.g.w - s.g.h / 2 - 8, 32, 24], [s.g.h / 2 + 8, s.g.h - 32, s.g.w - s.g.h / 2 - 8, s.g.h - 22, 24]]);
+  const inner = Math.max(L[1].frac, L[2].frac);
+  console.log(`  折射（凸透镜）：中线附近最大差 ${L[0].max}；离边 22–32px 那一圈 ${(inner * 100).toFixed(1)}% 在弯（玻璃板在这里是平的）`);
+  if (L[0].max > 8) { failures.push(`折射校验：凸透镜中线附近变化太大（最大差 ${L[0].max}），中间的字会糊`); }
+  if (inner < 0.05) { failures.push(`折射校验：凸透镜离边 22–32px 那一圈只有 ${(inner * 100).toFixed(1)}% 在弯——中间还是一块平的，看着像两个椭圆`); }
   await close(o, 'refract');
+}
+
+/** 两张截图在几个区域里比（区域按 CSS 像素给 [x0, y0, x1, y1, 阈值]，cssW 是元素的布局宽度）：每块里差值超过阈值的像素占比、最大差 */
+async function bandDiff(a, b, cssW, regions) {
+  const { ctx, page } = await open();
+  const r = await page.evaluate(async ([sa, sb, cssW, regions]) => {
+    const load = s => new Promise(ok => { const i = new Image(); i.onload = () => ok(i); i.src = s; });
+    const [ia, ib] = await Promise.all([load(sa), load(sb)]);
+    const w = ia.width, h = ia.height, k = w / cssW;
+    const px = img => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.drawImage(img, 0, 0); return g.getImageData(0, 0, w, h).data; };
+    const A = px(ia), B = px(ib);
+    return regions.map(([x0, y0, x1, y1, thr]) => {
+      let n = 0, t = 0, max = 0;
+      for (let y = Math.round(y0 * k); y < Math.round(y1 * k); y++) {
+        for (let x = Math.round(x0 * k); x < Math.round(x1 * k); x++) {
+          const i = (y * w + x) * 4, d = Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
+          t++; if (d > thr) { n++; } max = Math.max(max, d);
+        }
+      }
+      return { frac: t ? n / t : 0, max };
+    });
+  }, ['data:image/png;base64,' + a.toString('base64'), 'data:image/png;base64,' + b.toString('base64'), cssW, regions]);
+  await ctx.close();
+  return r;
 }
 
 /**
@@ -421,6 +462,15 @@ async function segCheck() {
   await p.mouse.move(T3[0].x, T3[0].y); await p.mouse.down();
   await p.mouse.move(T3[2].x, T3[2].y, { steps: 20 }); await p.waitForTimeout(300);
   const tb = await p.evaluate(() => { const l = document.querySelector('.demo-tabbar .lg-lift'); return !!l && l.hasAttribute('data-up') && /url/.test(getComputedStyle(l.querySelector('.lg-lift-ref')).backdropFilter); });
+  // 浮起的透镜要压在整条自己的高光环（.lg-glass::after）和 HDR 高光上面：同层的话高光环后画、盖在透镜上，透镜里透出一道整条的边
+  const zs = await p.evaluate(() => {
+    const bar = document.querySelector('.demo-tabbar'), l = bar.querySelector('.lg-lift'), t = document.createElement('img');
+    t.className = 'lg-hdr'; bar.appendChild(t);
+    const z = { lift: +getComputedStyle(l).zIndex, rim: +getComputedStyle(bar, '::after').zIndex, hdr: +getComputedStyle(t).zIndex };
+    t.remove();
+    return z;
+  });
+  if (!(zs.lift > zs.rim && zs.lift > zs.hdr)) { fail('玻璃导航条：浮起的透镜要压在整条的高光环和 HDR 高光上面（不然透镜里透出整条的边）：' + JSON.stringify(zs)); }
   const tz = await p.evaluate(() => [...document.querySelectorAll('.demo-tabbar > button')].map(x => ({ s: +(x.style.scale || 1), c: getComputedStyle(x).color, w: +getComputedStyle(x).fontWeight })));
   // 松手到落定，逐帧看：页面的 click 还没处理完的那一两帧里，原来那一项不许变回选中的样子（变粗、上色）。
   // 要看「这一帧画出来的样子」：在 window 冒泡阶段的 pointerup 里才开始逐帧记，这样每帧都排在脚本自己那一帧动画后面

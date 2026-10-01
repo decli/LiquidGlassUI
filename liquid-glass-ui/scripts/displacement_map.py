@@ -11,6 +11,10 @@
   位移：斜面「往里取样、越靠边位移越大」：D(s) = K·b·(1 − s/b)²，K = 0.45，s 是离边的距离。
         最外缘 D′ = −0.9：边上那一圈被拉开约十倍（放大）；取样位置 s + D(s) 处处单调（D′ > −1），
         不折叠——同一段内容不会被画两遍，边上不会出现镜像。
+  凸透镜（--lens，页面上写 data-lg-refract="lens"）：斜面一直到中线（b = 短边 / 2），剖面换成三次
+        D(s) = (2K/3)·b·(1 − s/b)³：最外缘同样 D′ = −0.9，但从中线起放大率连同它的变化率都是从 0 平滑长出来的——
+        整块是一个连续弯曲的凸透镜，看不出「外面一圈在弯、里面一块是平的」。一般剖面写成 m = (1 − s/b)^p、
+        最外缘位移 = (2K/p)·b，p = 2 是默认的玻璃板，p = 3 是凸透镜。
   编码：R / G = 往哪边取样（128 = 不动；feDisplacementMap 取 (x + scale·(R − .5), y + scale·(G − .5))），
         scale = 2 × 最外缘位移；B = 位移大小 m = (1 − s/b)²（0 中间、1 最外缘），滤镜拿它当模糊、散射、
         「用不用折射结果」的权重；A = 形状（圆角外透明）。
@@ -24,6 +28,7 @@
 用法：
   python3 displacement_map.py --w 344 --h 300 --radius 20 --bezel 18 --out map.png
   python3 displacement_map.py --w 220 --h 84 --radius 42 --bezel 22 --svg --id glass-a > filter.svg
+  python3 displacement_map.py --w 220 --h 84 --lens --svg --id drop > filter.svg      # 整块凸透镜
 """
 import argparse
 import base64
@@ -62,12 +67,12 @@ def corner(x, y, r):
     return y, 0.0, -1.0
 
 
-def texel(s, nx, ny, b, cov):
-    """一个像素的 RGBA：离边 s、朝外的法向、边宽 b、覆盖率 cov。往里取样 = 沿法向的反方向。"""
+def texel(s, nx, ny, b, cov, p=2):
+    """一个像素的 RGBA：离边 s、朝外的法向、边宽 b、覆盖率 cov、剖面指数 p。往里取样 = 沿法向的反方向。"""
     if s >= b:
         rgb = (128, 128, 0)
     else:
-        m = (1 - max(s, 0.0) / b) ** 2
+        m = (1 - max(s, 0.0) / b) ** p
         rgb = (js_round(127.5 - nx * m * 127.5), js_round(127.5 - ny * m * 127.5), js_round(m * 255))
     return rgb + (js_round(cov * 255),)
 
@@ -84,7 +89,12 @@ def arc_coverage(fx, fy, r, sub):
     return hits / 16
 
 
-def full_map(w, h, r, b):
+def depth_of(b, p=2):
+    """缺省的最外缘位移：(2K/p)·b——最外缘 D′ = −p·(2K/p) = −2K = −0.9，任何剖面指数都放大约十倍、不折叠"""
+    return 2 * K / p * b
+
+
+def full_map(w, h, r, b, p=2):
     """整张贴图（元素尺寸），RGBA bytes。每个像素折到离它最近的那个角的坐标系里算。"""
     lim = min(w, h) / 2
     r = min(max(r, 0.0), lim)
@@ -100,11 +110,11 @@ def full_map(w, h, r, b):
                 cov = arc_coverage(lambda s: (w - (x + (s + 0.5) / 4)) if rt else (x + (s + 0.5) / 4),
                                    lambda s: (h - (y + (s + 0.5) / 4)) if bt else (y + (s + 0.5) / 4), r, 1)
             s, nx, ny = corner(tx, ty, r)
-            px[(y * w + x) * 4:(y * w + x) * 4 + 4] = bytes(texel(s, -nx if rt else nx, -ny if bt else ny, b, cov))
+            px[(y * w + x) * 4:(y * w + x) * 4 + 4] = bytes(texel(s, -nx if rt else nx, -ny if bt else ny, b, cov, p))
     return bytes(px), r, b
 
 
-def tiles(c, r, b, density=TILE_PX):
+def tiles(c, r, b, density=TILE_PX, p=2):
     """运行时用的九宫格：{部位: (宽, 高, RGBA bytes)}。与 liquid-glass.js 的 tileSet 逐行对应。"""
     n = max(2, math.ceil(c * density))
     u = c / n
@@ -119,13 +129,13 @@ def tiles(c, r, b, density=TILE_PX):
             for x in range(W):
                 lx, ly = (x + 0.5) * u, (y + 0.5) * u
                 if k == 't':
-                    t = texel(ly, 0, -1, b, 1)
+                    t = texel(ly, 0, -1, b, 1, p)
                 elif k == 'b':
-                    t = texel(c - ly, 0, 1, b, 1)
+                    t = texel(c - ly, 0, 1, b, 1, p)
                 elif k == 'l':
-                    t = texel(lx, -1, 0, b, 1)
+                    t = texel(lx, -1, 0, b, 1, p)
                 elif k == 'r':
-                    t = texel(c - lx, 1, 0, b, 1)
+                    t = texel(c - lx, 1, 0, b, 1, p)
                 else:
                     tx, ty = (c - lx if rt else lx), (c - ly if bt else ly)
                     cov = 1.0
@@ -133,7 +143,7 @@ def tiles(c, r, b, density=TILE_PX):
                         cov = arc_coverage(lambda s: (c - (x + (s + 0.5) / 4) * u) if rt else (x + (s + 0.5) / 4) * u,
                                            lambda s: (c - (y + (s + 0.5) / 4) * u) if bt else (y + (s + 0.5) / 4) * u, r, u)
                     s, nx, ny = corner(tx, ty, r)
-                    t = texel(s, -nx if rt else nx, -ny if bt else ny, b, cov)
+                    t = texel(s, -nx if rt else nx, -ny if bt else ny, b, cov, p)
                 px[(y * W + x) * 4:(y * W + x) * 4 + 4] = bytes(t)
         out[k] = (W, H, bytes(px))
     return out
@@ -179,33 +189,35 @@ def svg_filter(fid, w, h, png, depth, disp=0.08, blur=None, scatter=0.05, bezel=
         f'     backdrop-filter: blur(14px) url(#{fid}) saturate(1.8); -->\n')
 
 
-def selftest():
+def selftest_one(p, w, h, r, bez):
     problems = []
-    w, h, r, bez = 120, 48, 24, 14
-    px, r, bez = full_map(w, h, r, bez)
-    depth = K * bez
+    px, r, bez = full_map(w, h, r, bez, p)
+    depth = depth_of(bez, p)
     scale = 2 * depth
     at = lambda x, y: px[(y * w + x) * 4:(y * w + x) * 4 + 4]
     disp_x = lambda x, y: (at(x, y)[0] / 255 - 0.5) * scale
+    ib = int(bez)
 
     mid = at(w // 2, h // 2)
-    if tuple(mid) != (128, 128, 0, 255):
+    if mid[3] != 255 or abs(mid[0] - 128) > 1 or abs(mid[1] - 128) > 1 or mid[2] > 1:
         problems.append(f'正中应当是「不动、m = 0、不透明」(128,128,0,255)，实际 {tuple(mid)}')
 
     # 竖直正中那一行：从左边缘往里，偏移指向里面（x 为正）、m 单调变小、取样位置单调变大（不折叠）
     y = h // 2
     row = [disp_x(x, y) for x in range(w // 2)]
-    if not all(v >= -1e-9 for v in row[:bez]):
+    if not all(v >= -1e-9 for v in row[:ib]):
         problems.append('左边的偏移应当指向里面（x 为正）')
-    ms = [at(x, y)[2] for x in range(bez + 2)]
-    if any(ms[i + 1] > ms[i] for i in range(len(ms) - 1)) or ms[0] < 200 or ms[bez + 1] != 0:
+    ms = [at(x, y)[2] for x in range(min(ib + 2, w // 2))]
+    if any(ms[i + 1] > ms[i] for i in range(len(ms) - 1)) or ms[0] < 200 or (ib + 1 < w // 2 and ms[ib + 1] != 0):
         problems.append(f'B 通道（位移大小）应当从边缘往里单调变小、斜面外为 0：{ms}')
-    pos = [x + 0.5 + row[x] for x in range(bez + 2)]
+    n = min(ib + 2, w // 2)
+    pos = [x + 0.5 + row[x] for x in range(n)]
     if any(pos[i + 1] <= pos[i] for i in range(len(pos) - 1)):
         problems.append('取样位置没有从边缘往里单调变大：贴图折叠了（边上的内容会被画两遍）')
 
-    # 解析式：处处 1 + D′(s) > 0，最外缘约 0.1（放大约十倍）
-    dmin = min(1 - 2 * K * (1 - s / bez) for s in [i / 100 * bez for i in range(101)])
+    # 解析式：D(s) = (2K/p)·b·t^p，1 + D′(s) = 1 − 2K·t^(p−1)：处处 > 0，最外缘约 0.1（放大约十倍）；
+    # 斜面里头那一端（t → 0）放大率和它的变化率都要平滑地从 1 / 0 长出来（p = 2 时变化率是一个定值起步，p = 3 时从 0 起步）
+    dmin = min(1 - 2 * K * (1 - s_ / bez) ** (p - 1) for s_ in [i / 100 * bez for i in range(101)])
     if not 0.05 < dmin < 0.2:
         problems.append(f'最外缘的 1 + D′ 应当约为 0.1（放大约十倍、不折叠），实际 {dmin:.3f}')
 
@@ -218,7 +230,7 @@ def selftest():
 
     # 九宫格拼回去，和整张逐像素一样（运行时脚本就是这么摆的：四条边各往角下面多伸 1px，角盖在上面）
     c = max(r, bez)
-    T = tiles(c, r, bez, density=1)
+    T = tiles(c, r, bez, density=1, p=p)
     comp = bytearray(w * h * 4)
     def paste(k, x0, y0, ww, hh):
         tw, th, data = T[k]
@@ -247,7 +259,13 @@ def selftest():
     png = png_rgba8(w, h, px)
     if not png.startswith(b'\x89PNG'):
         problems.append('PNG 不对')
-    print('最外缘位移 %.2fpx，scale %.2f，最外缘放大约 %.0f 倍' % (depth, scale, 1 / dmin))
+    print('剖面 p=%d：边宽 %.1f，最外缘位移 %.2fpx，scale %.2f，最外缘放大约 %.0f 倍' % (p, bez, depth, scale, 1 / dmin))
+    return problems
+
+
+def selftest():
+    problems = selftest_one(2, 120, 48, 24, 14)                  # 默认的玻璃板：边上弯、正中平
+    problems += ['凸透镜：' + x for x in selftest_one(3, 120, 48, 24, 24)]   # 凸透镜：斜面到中线（脚本里会夹到短边一半减 1）
     if problems:
         print('失败：' + '；'.join(problems))
         return 1
@@ -261,7 +279,8 @@ def main():
     ap.add_argument('--h', type=int, help='高（px）')
     ap.add_argument('--radius', type=float, default=None, help='圆角（px），缺省 = 高的一半（胶囊）')
     ap.add_argument('--bezel', type=float, default=None, help='玻璃边宽（px），缺省 = 短边 × 0.2，夹在 10–24')
-    ap.add_argument('--depth', type=float, default=None, help='最外缘位移（px），缺省 = 边宽 × 0.45')
+    ap.add_argument('--depth', type=float, default=None, help='最外缘位移（px），缺省 = 边宽 × 0.45（凸透镜 × 0.3）')
+    ap.add_argument('--lens', action='store_true', help='凸透镜：斜面一直到中线、三次剖面（页面上的 data-lg-refract="lens"）')
     ap.add_argument('--thick', type=float, default=None, help=argparse.SUPPRESS)   # 老参数：当 --depth 用
     ap.add_argument('--height', type=float, default=None, help=argparse.SUPPRESS)  # 老参数：不再用
     ap.add_argument('--disp', type=float, default=0.08, help='色散（红多折、蓝少折的比例），缺省 0.08；0 关掉')
@@ -276,9 +295,13 @@ def main():
     if not a.w or not a.h:
         ap.error('需要 --w 与 --h')
     r = a.h / 2 if a.radius is None else a.radius
-    bezel = a.bezel if a.bezel is not None else max(10, min(24, round(min(a.w, a.h) * 0.2)))
-    px, r, bezel = full_map(a.w, a.h, r, bezel)
-    depth = a.depth if a.depth is not None else a.thick if a.thick is not None else K * bezel
+    p = 3 if a.lens else 2
+    if a.lens:
+        bezel = min(a.w, a.h) / 2                                 # full_map 里会夹到短边一半减 1，和脚本一样
+    else:
+        bezel = a.bezel if a.bezel is not None else max(10, min(24, round(min(a.w, a.h) * 0.2)))
+    px, r, bezel = full_map(a.w, a.h, r, bezel, p)
+    depth = a.depth if a.depth is not None else a.thick if a.thick is not None else depth_of(bezel, p)
     png = png_rgba8(a.w, a.h, px)
     if a.out:
         with open(a.out, 'wb') as f:

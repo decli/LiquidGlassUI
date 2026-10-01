@@ -260,11 +260,12 @@
 
           <section class="lg-card">
             <h2 class="lg-card-title">折射演示</h2>
-            <p class="lg-hint">把玻璃拖到字上。Chrome / Edge 的「完整」档下，玻璃边上那一圈把背后的字和条纹放大、弯折（还带一点彩边），
-              正中原样、一个像素都不动；其他浏览器只模糊。花纹只放在这一小块里——整页铺底纹是噪声。</p>
+            <p class="lg-hint">把玻璃拖到字上。Chrome / Edge 的「完整」档下，这一小块玻璃整块是一个凸透镜（<code>data-lg-refract="lens"</code>）：
+              从中线往边上越弯越厉害，边上把背后的字和条纹放大、弯折（还带一点彩边），中线附近几乎不动；其他浏览器只模糊。
+              大块面板用默认的写法：只有边上那一圈在弯、正中原样。花纹只放在这一小块里——整页铺底纹是噪声。</p>
             <div class="demo-lab" id="lab">
               <div class="demo-lab-text">Liquid Glass 把光往中间收<br>边缘像一块有厚度的凸透镜</div>
-              <div class="lg-glass demo-drop" id="drop" data-lg-refract="22 10" role="img" aria-label="一块可以拖动的玻璃"></div>
+              <div class="lg-glass demo-drop" id="drop" data-lg-refract="lens" role="img" aria-label="一块可以拖动的玻璃"></div>
             </div>
           </section>
         </div>

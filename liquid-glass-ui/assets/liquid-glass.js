@@ -1,5 +1,5 @@
 /*!
- * Liquid Glass UI —— 交互层 v1.1.0
+ * Liquid Glass UI —— 交互层 v1.2.0
  *
  * 只管「看着像玻璃、摸着像水」，不碰业务：不发请求、不改表单、不改页面元素的 class。
  * 删掉这个 <script>，页面照样能用——liquid-glass.css 里有不带脚本的退路。
@@ -54,7 +54,7 @@
    */
   function inert() {
     var self = {
-      version: '1.1.0', supported: false,
+      version: '1.2.0', supported: false,
       init: function () { return self; }, mode: function () { return 'off'; }, tier: function () { return 'l0'; },
       setMode: function () {}, refresh: function () {}, describe: function () { return ''; }, notify: function () {}
     };
@@ -329,12 +329,16 @@
     } else if (x < y) { out[0] = x; out[1] = -1; out[2] = 0; }
     else { out[0] = y; out[1] = 0; out[2] = -1; }
   }
-  /** 一个像素：离边 s、朝外的法向 (nx, ny)、边宽 b、覆盖率 cov。往里取样 = 沿法向的反方向 */
-  function texel(px, i, s, nx, ny, b, cov) {
+  /**
+   * 一个像素：离边 s、朝外的法向 (nx, ny)、边宽 b、覆盖率 cov、剖面指数 pw。往里取样 = 沿法向的反方向。
+   * 位移大小 m = (1 − s/b)^pw：pw = 2 是默认的玻璃板（边上弯、正中平）；pw = 3 是凸透镜（data-lg-refract="lens"，
+   * 斜面一直到中线）——放大率连同它的变化率都从中线平滑地长出来，看不出「外面一圈在弯、里面一块是平的」
+   */
+  function texel(px, i, s, nx, ny, b, cov, pw) {
     if (s >= b) { px[i] = 128; px[i + 1] = 128; px[i + 2] = 0; }
     else {
       var m = 1 - Math.max(s, 0) / b;
-      m *= m;
+      m = pw === 3 ? m * m * m : m * m;
       px[i] = Math.round(127.5 - nx * m * 127.5);
       px[i + 1] = Math.round(127.5 - ny * m * 127.5);
       px[i + 2] = Math.round(m * 255);
@@ -342,9 +346,9 @@
     px[i + 3] = Math.round(cov * 255);
   }
 
-  /** 一套九宫格贴图（八张 data URL），按「角的边长 × 圆角 × 边宽」缓存。贴图按 2 倍密度画，高分屏上也细 */
-  function tileSet(c, r, b) {
-    var key = c.toFixed(2) + '|' + r.toFixed(2) + '|' + b.toFixed(2);
+  /** 一套九宫格贴图（八张 data URL），按「角的边长 × 圆角 × 边宽 × 剖面」缓存。贴图按 2 倍密度画，高分屏上也细 */
+  function tileSet(c, r, b, pw) {
+    var key = c.toFixed(2) + '|' + r.toFixed(2) + '|' + b.toFixed(2) + '|' + pw;
     if (tileSets[key]) { return tileSets[key]; }
     if (tileCount > 24) { tileSets = {}; tileCount = 0; }
     var n = Math.max(2, Math.ceil(c * TILE_PX)), u = c / n, set = {}, o = [0, 0, 0], p, k;
@@ -359,10 +363,10 @@
         for (x = 0; x < W; x++) {
           var lx = (x + 0.5) * u, ly = (y + 0.5) * u, i = (y * W + x) * 4;
           if (edge) {
-            if (k === 't') { texel(px, i, ly, 0, -1, b, 1); }
-            else if (k === 'b') { texel(px, i, c - ly, 0, 1, b, 1); }
-            else if (k === 'l') { texel(px, i, lx, -1, 0, b, 1); }
-            else { texel(px, i, c - lx, 1, 0, b, 1); }
+            if (k === 't') { texel(px, i, ly, 0, -1, b, 1, pw); }
+            else if (k === 'b') { texel(px, i, c - ly, 0, 1, b, 1, pw); }
+            else if (k === 'l') { texel(px, i, lx, -1, 0, b, 1, pw); }
+            else { texel(px, i, c - lx, 1, 0, b, 1, pw); }
             continue;
           }
           var tx = rt ? c - lx : lx, ty = bt ? c - ly : ly, cov = 1, sx, sy;
@@ -377,7 +381,7 @@
             }
           }
           corner(tx, ty, r, o);
-          texel(px, i, o[0], rt ? -o[1] : o[1], bt ? -o[2] : o[2], b, cov);
+          texel(px, i, o[0], rt ? -o[1] : o[1], bt ? -o[2] : o[2], b, cov, pw);
         }
       }
       g.putImageData(img, 0, 0);
@@ -473,12 +477,13 @@
     w = Math.round(w); h = Math.round(h);
     var lim = Math.min(w, h) / 2;
     r = clamp(r, 0, lim);
-    var b = clamp(look.bezel, 2, Math.max(2, lim - 1)), c = Math.max(r, b);
-    var depth = look.depth || b * K, blur = look.blur || 0.5, scat = look.scatter == null ? 0.05 : look.scatter;
-    var sig = w + 'x' + h + '|' + r.toFixed(2) + '|' + b.toFixed(2) + '|' + depth.toFixed(2) + '|' + blur.toFixed(2) + '|' + scat;
+    var b = clamp(look.bezel, 2, Math.max(2, lim - 1)), c = Math.max(r, b), pw = look.power === 3 ? 3 : 2;
+    // 缺省的最外缘位移 (2K/pw)·b：最外缘 D′ = −2K = −0.9，任何剖面都放大约十倍、不折叠
+    var depth = look.depth || b * 2 * K / pw, blur = look.blur || 0.5, scat = look.scatter == null ? 0.05 : look.scatter;
+    var sig = w + 'x' + h + '|' + r.toFixed(2) + '|' + b.toFixed(2) + '|' + depth.toFixed(2) + '|' + blur.toFixed(2) + '|' + scat + '|' + pw;
     if (sig === F.sig) { return; }
     F.sig = sig;
-    var set = tileSet(c, r, b), mid = (w - 2 * c + 2).toFixed(2), tall = (h - 2 * c + 2).toFixed(2), k;
+    var set = tileSet(c, r, b, pw), mid = (w - 2 * c + 2).toFixed(2), tall = (h - 2 * c + 2).toFixed(2), k;
     var box = {
       t: [c - 1, 0, mid, c], b: [c - 1, h - c, mid, c], l: [0, c - 1, c, tall], r: [w - c, c - 1, c, tall],
       tl: [0, 0, c, c], tr: [w - c, 0, c, c], bl: [0, h - c, c, c], br: [w - c, h - c, c, c]
@@ -527,16 +532,19 @@
    * 位移缺省 = 0.45 × 边宽。面板越大，边越宽、折得越多；小控件边窄，不然整颗都在弯、字看着晃。
    */
   function refractParams(el, cfg, w, h) {
-    var b = cfg.bezel, d = cfg.depth;
+    var b = cfg.bezel, d = cfg.depth, pw = cfg.power === 3 ? 3 : 2;
     if (!b) {
-      var v = (el.getAttribute('data-lg-refract') || '').split(/[\s,]+/);
-      if (v[0] !== '' && !isNaN(parseFloat(v[0]))) {
+      var raw = el.getAttribute('data-lg-refract') || '', v = raw.split(/[\s,]+/);
+      if (/^\s*lens\b/i.test(raw)) {
+        // 凸透镜：斜面一直到中线（setGeom 夹到短边一半减 1）、三次剖面——整块连续地弯，没有平的内圈。给小块的玻璃用
+        b = Math.min(w, h) / 2; pw = 3; d = v.length >= 2 ? num(v[1], 0) : 0;
+      } else if (v[0] !== '' && !isNaN(parseFloat(v[0]))) {
         b = num(v[0], 16);
         d = v.length >= 3 ? num(v[2], 0) : v.length === 2 ? num(v[1], 0) : 0;
       } else { b = clamp(Math.round(Math.min(w, h) * 0.2), 10, 24); }
     }
     return {
-      bezel: b, depth: d || b * K, blur: Math.max(0.5, b * 0.06),
+      bezel: b, depth: d || b * 2 * K / pw, power: pw, blur: Math.max(0.5, b * 0.06),
       disp: cfg.disp == null ? 0.08 : cfg.disp, scatter: cfg.scatter == null ? 0.05 : cfg.scatter
     };
   }
@@ -1864,7 +1872,7 @@
   }
 
   var api = win.LiquidGlass = {
-    version: '1.1.0',
+    version: '1.2.0',
     /** true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身 */
     supported: true,
     /** 换配置（同 window.LiquidGlassConfig 的选项），返回 LiquidGlass 本身 */
