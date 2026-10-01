@@ -37,7 +37,7 @@ description: >-
 | `references/design-spec.md` | 定稿的设计规范：令牌、每个组件的尺寸、动效参数、三档定义 | 做任何视觉决定时 |
 | `references/integration.md` | 接入指南：组件类、data 属性、配置、接口、框架、CSP、检查清单 | 接进项目时 |
 | `references/principles.md` | 技术原理：玻璃怎么搭、折射的位移曲线与滤镜链、九宫格、HDR、弹簧、分段开关的浮起与拖动、分档、背景根 | 改算法或解释原理时 |
-| `references/pitfalls.md` | 37 个「不报错、只是静静地坏掉」的坑，按症状查 | 出现诡异现象时先查 |
+| `references/pitfalls.md` | 40 个「不报错、只是静静地坏掉」的坑，按症状查 | 出现诡异现象时先查 |
 | `references/design-decisions.md` | 每轮评审指出了什么、为什么这样改 | 用户想改风格、或你想「改回」某个做法之前 |
 
 ## 工作流程

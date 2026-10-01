@@ -95,7 +95,7 @@ if (depth) { bad.push(`文件结束时还有 ${depth} 个 { 没有配对`); }
 check('样式表括号配对', bad);
 
 const defined = new Set([...plain.matchAll(/(--[\w-]+)\s*:/g)].map(m => m[1]));
-const LOCAL = ['--lg-t', '--lg-b', '--lg-s', '--lg-rw', '--lg-ref', '--mx', '--my', '--m', '--a', '--p'];
+const LOCAL = ['--lg-t', '--lg-b', '--lg-s', '--lg-rw', '--lg-ref', '--mx', '--my', '--m', '--a', '--p', '--lg-z'];
 const used = [...plain.matchAll(/var\(\s*(--[\w-]+)/g)].map(m => m[1]);
 check('用到的 var(--x) 都有定义（或是约定的局部变量）',
   [...new Set(used)].filter(v => !defined.has(v) && !LOCAL.includes(v)).map(v => `${v} 没有定义`));

@@ -455,11 +455,22 @@ select.lg-field {
 .lg-seg[data-lg-slider-on] { -webkit-user-select: none; user-select: none; touch-action: pan-y; }
 .lg-seg[data-lg-slider-on] > button { cursor: grab; }
 .lg-seg[data-lg-drag], .lg-seg[data-lg-drag] > button { cursor: grabbing; }
-/* 拖动中、浮着飞的路上：离玻璃最近的那一项先变成选中的样子，其余（包括页面已经标成选中的那一项）退回普通——
-   选中色跟着玻璃走，而不是一点就跳到终点 */
-.lg-seg[data-lg-drag] > button, .lg-seg[data-lg-fly] > button { color: var(--lg-ink-2); font-weight: 400; }
-.lg-seg--sm[data-lg-drag] > button, .lg-seg--sm[data-lg-fly] > button { font-weight: 600; }
-.lg-seg[data-lg-drag] > button[data-lg-near], .lg-seg[data-lg-fly] > button[data-lg-near] { color: var(--lg-ink); font-weight: 600; }
+/* 字的选中样子跟着玻璃走（data-lg-ink：拖着、浮着飞、松手后页面还没把选中改过来的那一小会儿）：
+   离玻璃最近的那一项先变成选中的样子，其余（包括页面还标着选中的那一项）退回普通——而不是一点就跳到终点 */
+.lg-seg[data-lg-ink] > button { color: var(--lg-ink-2); font-weight: 400; transition: none; }
+.lg-seg--sm[data-lg-ink] > button { font-weight: 600; }
+.lg-seg[data-lg-ink] > button[data-lg-near] { color: var(--lg-ink); font-weight: 600; }
+/* 浏览器认得 color-mix 的话不再一枚一枚地换：被玻璃盖住多少（--lg-z，0–1，脚本逐帧写），就有多少变成选中的样子——
+   颜色、粗细跟着玻璃连续过渡；字的放大（--lg-seg-mag × 盖住多少 × 浮起多少）由脚本写在 scale 上。
+   上面关掉了颜色过渡：值逐帧在变，再叠 0.2 秒的过渡，字就落在玻璃后面 */
+.lg-seg { --lg-seg-mag: .12; }
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  .lg-seg[data-lg-ink] > button, .lg-seg[data-lg-ink] > button[data-lg-near] {
+    color: color-mix(in srgb, var(--lg-ink) calc(var(--lg-z, 0) * 100%), var(--lg-ink-2));
+    font-weight: calc(400 + 200 * var(--lg-z, 0));
+  }
+  .lg-seg--sm[data-lg-ink] > button, .lg-seg--sm[data-lg-ink] > button[data-lg-near] { font-weight: 600; }
+}
 .lg-seg--sm { padding: 2px; border-radius: 15px; }
 .lg-seg--sm > button { height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600; }
 .lg-seg--block { display: flex; }
@@ -471,17 +482,25 @@ select.lg-field {
 .lg-seg--glass > button {
   flex: 1 1 0; min-width: 0; height: auto; min-height: 50px; padding: 5px 10px; border-radius: 999px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  font-size: 11.5px; font-weight: 600; line-height: 1.2; color: var(--lg-ink-2);
+  font-size: 11.5px; font-weight: 500; line-height: 1.2; color: var(--lg-ink-2);
 }
 .lg-seg--glass > button + button { margin-left: 0; }
 .lg-seg--glass > button > svg { width: 20px; height: 20px; margin-bottom: 3px; flex: none; }
 .lg-seg--glass > button > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .lg-seg--glass > button[aria-pressed="true"], .lg-seg--glass > button[aria-selected="true"] {
-  background: var(--lg-tab-sel); box-shadow: var(--lg-tab-sel-sh); color: var(--lg-accent);
+  background: var(--lg-tab-sel); box-shadow: var(--lg-tab-sel-sh); color: var(--lg-accent); font-weight: 650;
 }
 .lg-seg--glass > .lg-thumb-seg { background: var(--lg-tab-sel); box-shadow: var(--lg-tab-sel-sh); }
-.lg-seg--glass[data-lg-drag] > button, .lg-seg--glass[data-lg-fly] > button { color: var(--lg-ink-2); font-weight: 600; }
-.lg-seg--glass[data-lg-drag] > button[data-lg-near], .lg-seg--glass[data-lg-fly] > button[data-lg-near] { color: var(--lg-accent); }
+.lg-seg--glass[data-lg-ink] > button { color: var(--lg-ink-2); font-weight: 500; }
+.lg-seg--glass[data-lg-ink] > button[data-lg-near] { color: var(--lg-accent); font-weight: 650; }
+/* 玻璃导航条底下的图标和字放得更大一些（iOS 26 按住标签栏时，透镜底下那一项明显被放大） */
+.lg-seg--glass { --lg-seg-mag: .18; }
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  .lg-seg--glass[data-lg-ink] > button, .lg-seg--glass[data-lg-ink] > button[data-lg-near] {
+    color: color-mix(in srgb, var(--lg-accent) calc(var(--lg-z, 0) * 100%), var(--lg-ink-2));
+    font-weight: calc(500 + 150 * var(--lg-z, 0));
+  }
+}
 
 /* ══ 9 侧栏 ═════════════════════════════════════════════════════════════
  * 一块浮在页面底上的玻璃板：离窗口边 12px、圆角 24px。侧栏自己不滚，中间的 .lg-nav 滚——

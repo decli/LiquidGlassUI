@@ -299,7 +299,8 @@ async function segCheck() {
     const seg = document.querySelector(s), T = seg.__lgT, lift = seg.querySelector('.lg-lift');
     return { up: T.up, fly: T.fly, st: T.st, transform: seg.style.transform, lifted: !!lift && lift.hasAttribute('data-up'),
       ref: lift ? getComputedStyle(lift.querySelector('.lg-lift-ref')).backdropFilter : '', plate: +seg.querySelector('.lg-thumb').style.opacity,
-      near: [...seg.children].findIndex(x => x.hasAttribute('data-lg-near')) };
+      near: [...seg.children].findIndex(x => x.hasAttribute('data-lg-near')), ink: seg.hasAttribute('data-lg-ink'),
+      scale: [...seg.querySelectorAll(':scope > button')].map(x => +(x.style.scale || 1)) };
   }, SEG);
 
   let o = await prep(), p = o.page, B = await at(p);
@@ -311,9 +312,12 @@ async function segCheck() {
   await p.mouse.move(B[0].x, B[0].y); await p.mouse.down(); await p.waitForTimeout(450);
   let s = await st(p);
   if (!s.lifted || s.up < 0.9 || !/url/.test(s.ref) || s.plate > 0.05) { fail('按住选中项，滑块应当浮起成一块正在折射的透镜：' + JSON.stringify(s)); }
+  // 透镜底下的字被放大（iOS 26）：按住的那一项放大，别的项不动
+  if (!(s.scale[0] > 1.08 && s.scale.slice(1).every(x => x === 1))) { fail('按住选中项：透镜底下那一项的字应当放大、别的项不动：' + JSON.stringify(s.scale)); }
   await p.mouse.up(); await p.waitForTimeout(500);
   s = await st(p);
   if (s.lifted || await sel(p) !== 0) { fail('只按一下不动：应当落回去、不换选中'); }
+  if (s.scale.some(x => x !== 1)) { fail('透镜落下后字应当缩回原样：' + JSON.stringify(s.scale)); }
   await p.mouse.move(B[0].x, B[0].y); await p.mouse.down();
   await p.mouse.move(B[2].x, B[2].y, { steps: 20 }); await p.waitForTimeout(200);
   if ((await st(p)).near !== 2) { fail('拖动中离滑块最近的那一项应当标 data-lg-near'); }
@@ -354,12 +358,14 @@ async function segCheck() {
   // 选中色跟着玻璃走、依次经过中间的项，而不是一点就跳到终点
   await p.evaluate(s => {
     const seg = document.querySelector(s), btns = [...seg.querySelectorAll(':scope > button')];
-    window.__trip = { near: [], lens: 0 };
+    window.__trip = { near: [], lens: 0, big: btns.map(() => 1), mid: btns.map(() => false) };
     const tick = () => {
       if (!window.__trip) { return; }
-      const n = btns.findIndex(b => b.hasAttribute('data-lg-near')), l = seg.querySelector('.lg-lens');
-      if (n >= 0 && window.__trip.near[window.__trip.near.length - 1] !== n) { window.__trip.near.push(n); }
-      if (l) { window.__trip.lens = Math.max(window.__trip.lens, parseFloat(l.style.getPropertyValue('--a') || 0)); }
+      const n = btns.findIndex(b => b.hasAttribute('data-lg-near')), l = seg.querySelector('.lg-lens'), t = window.__trip;
+      if (n >= 0 && t.near[t.near.length - 1] !== n) { t.near.push(n); }
+      if (l) { t.lens = Math.max(t.lens, parseFloat(l.style.getPropertyValue('--a') || 0)); }
+      // 玻璃路过时字的放大和上色是连续的：记每一项放大到多少、有没有出现过「盖住一半」的中间态
+      btns.forEach((b, i) => { t.big[i] = Math.max(t.big[i], +(b.style.scale || 1)); const z = parseFloat(b.style.getPropertyValue('--lg-z')); if (z > 0.15 && z < 0.85) { t.mid[i] = true; } });
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -372,8 +378,12 @@ async function segCheck() {
   if (!(trip.near.indexOf(1) >= 0 && trip.near.indexOf(2) >= 0 && trip.near[trip.near.length - 1] === 3)) {
     fail('点别的项：选中色应当跟着玻璃依次经过中间的项，实际经过 ' + JSON.stringify(trip.near));
   }
+  if (!(trip.big[1] > 1.02 && trip.big[2] > 1.02 && trip.big[3] > 1.08 && trip.mid[1] && trip.mid[2])) {
+    fail('点别的项：玻璃路过的字应当跟着被盖住的比例连续放大、上色（' + JSON.stringify(trip) + '）');
+  }
   s = await st(p);
   if (s.fly || s.lifted || await sel(p) !== 3) { fail('点别的项：到了应当落下、选中那一项'); }
+  if (s.ink || s.scale.some(x => x !== 1)) { fail('点别的项：落定后字应当复原、data-lg-ink 撤掉：' + JSON.stringify(s)); }
   await close(o, 'seg band');
 
   // 按住别的项（iOS 26：手指按在哪一项，玻璃就到哪一项底下）：还没松手就浮起、飞到手指下面；松手才交给页面去选
@@ -399,9 +409,23 @@ async function segCheck() {
   await p.mouse.move(T3[0].x, T3[0].y); await p.mouse.down();
   await p.mouse.move(T3[2].x, T3[2].y, { steps: 20 }); await p.waitForTimeout(300);
   const tb = await p.evaluate(() => { const l = document.querySelector('.demo-tabbar .lg-lift'); return !!l && l.hasAttribute('data-up') && /url/.test(getComputedStyle(l.querySelector('.lg-lift-ref')).backdropFilter); });
+  const tz = await p.evaluate(() => [...document.querySelectorAll('.demo-tabbar > button')].map(x => ({ s: +(x.style.scale || 1), c: getComputedStyle(x).color, w: +getComputedStyle(x).fontWeight })));
+  // 松手到落定，逐帧看：页面的 click 还没处理完的那一两帧里，原来那一项不许变回选中的样子（变粗、上色）。
+  // 要看「这一帧画出来的样子」：在 window 冒泡阶段的 pointerup 里才开始逐帧记，这样每帧都排在脚本自己那一帧动画后面
+  // （画面就是它之后的样子）；rAF 里接 setTimeout 再看不行——替用户点的那一下 click 排在它前面，看到的已经是改好的
+  await p.evaluate(() => {
+    const bs = [...document.querySelectorAll('.demo-tabbar > button')], bad = window.__tbBad = [];
+    const tick = () => { if (window.__tbBad !== bad) { return; } const w = bs.map(b => +getComputedStyle(b).fontWeight); if (w[0] > 560 || w[2] < 600) { bad.push(w); } requestAnimationFrame(tick); };
+    window.addEventListener('pointerup', () => requestAnimationFrame(tick), { once: true });
+  });
   await p.mouse.up(); await p.waitForTimeout(1000);
+  const tbad = await p.evaluate(() => { const b = window.__tbBad; window.__tbBad = null; return b; });
   const tsel = await p.evaluate(() => [...document.querySelectorAll('.demo-tabbar > button')].findIndex(x => x.getAttribute('aria-pressed') === 'true'));
   if (!tb || tsel !== 2) { fail('玻璃导航条：按住拖到第三项，透镜应当浮起并折射、松手选中第三项：' + JSON.stringify({ lifted: tb, sel: tsel })); }
+  if (!(tz[2].s > 1.12 && tz[2].w >= 600 && tz[2].c !== tz[0].c && tz[0].s === 1 && tz[0].w <= 560)) {
+    fail('玻璃导航条：透镜底下那一项应当放大、变粗、换成主色，离开的那一项复原：' + JSON.stringify(tz));
+  }
+  if (tbad.length) { fail(`玻璃导航条：松手后有 ${tbad.length} 帧字的样子退回了页面的旧选中（粗细 ${JSON.stringify(tbad[0])}），会闪一下`); }
   await close(o, 'tabbar');
 
   o = await prep('lite'); p = o.page; B = await at(p);
@@ -412,7 +436,7 @@ async function segCheck() {
   await p.mouse.up(); await p.waitForTimeout(300);
   if (await sel(p) !== 1) { fail('精简档：应当照样能拖着换选中'); }
   await close(o, 'seg lite');
-  console.log('  分段开关：按住浮起、拖、甩、橡皮筋、点、按住别的项、玻璃导航条、精简档都过了一遍');
+  console.log('  分段开关：按住浮起（字放大）、拖、甩、橡皮筋、点（字跟着玻璃连续变）、按住别的项、玻璃导航条、精简档都过了一遍');
 }
 
 /**
@@ -442,7 +466,34 @@ async function overflowCheck() {
     const m = await p.evaluate(() => { window.__ov++; return window.__ovm; });
     if (m.h > m.h0 || m.w > m.w0) { failures.push(`滚动条：鼠标划过${name}最后一项时滚动尺寸被撑大（${m.w0}×${m.h0} → ${m.w}×${m.h}），滚动条会闪一下`); }
   }
-  console.log('  滚动容器：表格、侧栏菜单的最后一项来回划过，滚动尺寸没被撑大');
+  // 内容变短：停在最后一行，再去点筛选只剩两行。透镜（淡出中、淡完了的都算）不能还停在原来第十行那儿撑着。
+  // 每帧画完再量（rAF 里接 setTimeout）：同一帧里脚本还没来得及挪透镜的中间态不算
+  if (await p.locator('#filter button[data-filter="warn"]').count()) {
+    const rows = p.locator('.lg-table tbody tr'), n = await rows.count();
+    const last = await rows.nth(n - 1).boundingBox();
+    await p.mouse.move(last.x + last.width * 0.4, last.y + last.height / 2, { steps: 3 }); await p.waitForTimeout(500);
+    await p.evaluate(() => {
+      const w = document.querySelector('.lg-table-wrap'), bad = window.__ovBad = [];
+      const tok = (window.__ov = (window.__ov || 0) + 1);
+      const t = () => {
+        if (window.__ov !== tok) { return; }
+        setTimeout(() => { const d = [w.scrollWidth - w.clientWidth, w.scrollHeight - w.clientHeight]; if (d[0] > 0 || d[1] > 0) { bad.push(d); } }, 0);
+        requestAnimationFrame(t);
+      };
+      requestAnimationFrame(t);
+    });
+    await p.click('#filter button[data-filter="warn"]'); await p.waitForTimeout(600);
+    const k = await rows.count();
+    for (let i = 0; i < 2 * k; i++) {
+      const r = await rows.nth(i % k).boundingBox();
+      await p.mouse.move(r.x + r.width * 0.4, r.y + r.height / 2, { steps: 3 }); await p.waitForTimeout(300);
+    }
+    await p.mouse.move(last.x + 40, 40, { steps: 3 }); await p.waitForTimeout(500);
+    const bad = await p.evaluate(() => { window.__ov++; return window.__ovBad; });
+    if (bad.length) { failures.push(`滚动条：表格筛完只剩 ${k} 行后有 ${bad.length} 帧被透镜撑出滚动范围（${JSON.stringify(bad[0])}）`); }
+    await p.click('#filter button[data-filter=""]'); await p.waitForTimeout(300);
+  }
+  console.log('  滚动容器：表格、侧栏菜单的最后一项来回划过、表格筛短之后，滚动尺寸都没被撑大');
   await close(o, 'overflow');
 }
 

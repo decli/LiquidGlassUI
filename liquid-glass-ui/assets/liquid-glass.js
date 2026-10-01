@@ -643,12 +643,20 @@
   /**
    * 装透镜 / 滑块的容器若是滚动容器（overflow: auto / scroll），记下内容的范围：画的时候整块不许伸出去。
    * 伸出去一个像素，滚动尺寸就被撑大，滚动条闪一下（表格最后一行：透镜回弹往下多冲 1px，竖滚动条一出来又挤出横滚动条）。
-   * 量的时候透镜一直被关在里面，所以量到的就是内容本身的范围。
+   * 量之前先把自己放进去的玻璃藏起来：内容变短时它们还停在原处（表格筛完只剩两行，透镜还在原来第十行那儿），
+   * 带着它们量，量到的就是被它们撑大的范围。
    */
+  var OWN_RE = /(^|\s)lg-(lens|thumb|lift)(\s|$)/;
   function scrollBox(el) {
     var s = win.getComputedStyle(el);
     if (!/auto|scroll/.test(s.overflowX + ' ' + s.overflowY)) { return null; }
-    return { w: el.scrollWidth, h: el.scrollHeight };
+    var hid = [], k = el.children, i;
+    for (i = 0; i < k.length; i++) {
+      if (OWN_RE.test(k[i].getAttribute('class') || '')) { hid.push([k[i], k[i].style.display]); k[i].style.display = 'none'; }
+    }
+    var box = { w: el.scrollWidth, h: el.scrollHeight };
+    for (i = 0; i < hid.length; i++) { hid[i][0].style.display = hid[i][1]; }
+    return box;
   }
   /** 把以 (x, y) 为左上角、w × h、以中心缩放 (sx, sy) 的一块挪回 box 里面；返回挪过的左上角 */
   function keepIn(box, x, y, w, h, sx, sy) {
@@ -859,6 +867,10 @@
     el.style.height = Math.max(0, L.h).toFixed(2) + 'px';
     el.style.borderRadius = (L.rad != null ? L.rad : Math.max(0, Math.min(L.w, L.h)) / 2).toFixed(2) + 'px';
     var at = keepIn(L.clip, L.x + ox, L.y + oy, L.w, L.h, sx * s0, sy * s0);
+    if (!L.ta && a < 0.002) {
+      // 撤完了：缩成 0 × 0 停在左上角。看不见的透镜也占着滚动范围——内容一变短，它就把滚动条撑出来
+      el.style.width = el.style.height = '0px'; at = [0, 0]; sx = sy = s0 = 1;
+    }
     el.style.transform = 'translate3d(' + at[0].toFixed(2) + 'px,' + at[1].toFixed(2) + 'px,0) scale('
       + (sx * s0).toFixed(4) + ',' + (sy * s0).toFixed(4) + ')';
     el.style.setProperty('--a', a.toFixed(3));
@@ -946,9 +958,10 @@
         if (T.el && T.el.parentNode) { T.el.parentNode.removeChild(T.el); }
         T.el = null; T.cur = null; T.a = T.ta = T.va = 0;
         if (T.drag) { T.drag.moved = false; dragStop(T); }
-        dropLift(T); segNear(T, null);
+        dropLift(T); segNear(T, null); segInkOff(T);
         T.up = T.tup = T.vup = 0; T.st = T.vst = 0; T.fly = false; T.S = null; segStretch(T);
         if (th[i].hasAttribute('data-lg-fly')) { th[i].removeAttribute('data-lg-fly'); }
+        if (th[i].hasAttribute('data-lg-ink')) { th[i].removeAttribute('data-lg-ink'); }
       }
       th[i].removeAttribute('data-lg-slider-on');
     }
@@ -959,6 +972,7 @@
     for (var i = lenses.length - 1; i >= 0; i--) {
       var L = lenses[i];
       if (!doc.body.contains(L.surf)) { if (L.F) { dropFilter(L.F); } L.surf.__lgL = null; lenses.splice(i, 1); continue; }
+      if (L.el && L.clip) { L.clip = scrollBox(L.surf); L.paint(); }   // 内容变了：按新的范围再关一次（淡出中的也算）
       if (!L.ta || !L.cur) { continue; }
       if (!L.el || L.el.parentNode !== L.surf || !L.surf.contains(L.cur) || !visible(L.cur)) {
         L.hover = L.focus = false; L.ta = 0; L.cur = null; animate(L);
@@ -987,7 +1001,8 @@
       // 分段开关才用（§5.5）：浮起 up、浮着飞 fly、整条被拉长 / 压扁 st（钉住 pin 那一端）、拖动 drag、浮起的透镜 lz
       up: 0, vup: 0, tup: 0, fly: false, st: 0, vst: 0, pin: 'left', stKey: '', drag: null, lz: null, near: null, pad: 0, userAt: 0,
       pend: null,  // 松手后替用户选的那一项，等页面接手（{ el, until }）
-      S: null, clip: null   // 浮着飞时各项的位置（字的选中色跟着玻璃走）；滚动容器的内容范围
+      S: null, clip: null,  // 浮着飞时各项的位置（字的选中色跟着玻璃走）；滚动容器的内容范围
+      zS: null, zOld: false, mag: 0   // 玻璃底下的字：各项的位置（浮起时量一次，排版变了重量）、放大多少（--lg-seg-mag）
     };
     T.step = function (dt) { return thumbStep(T, dt); };
     T.paint = function () { thumbPaint(T); };
@@ -1033,13 +1048,14 @@
     var jump = T.a < 0.05 || calm() || (T.resized && surf.offsetWidth !== T.w0);
     T.resized = false; T.w0 = surf.offsetWidth;
     T.clip = scrollBox(surf);
+    if (T.zS) { T.zOld = true; animate(T); }         // 排版可能变了：玻璃底下的字下一帧重新量（不先复原，免得闪一帧）
     if (T.drag) {                                    // 按着的时候滑块听手指的；整片重画了就作废，按页面现在的选中落定
       for (i = 0; i < T.drag.S.length; i++) { if (!surf.contains(T.drag.S[i].el)) { dragStop(T); break; } }
       if (T.drag) { return; }
     }
     // 松手后滑块已经先到了用户选的那一项；页面还没改过来（异步处理）的这一小会儿别把它拽回去，过了时限再按页面的来
     if (T.pend) {
-      if (cur === T.pend.el || Date.now() > T.pend.until || !surf.contains(T.pend.el)) { T.pend = null; } else { return; }
+      if (cur === T.pend.el || Date.now() > T.pend.until || !surf.contains(T.pend.el)) { T.pend = null; animate(T); } else { return; }
     }
     if (!cur) {
       T.cur = null;
@@ -1128,6 +1144,7 @@
       }
       segStretch(T);
       liftPaint(T, Z, L, w, h, up);
+      segInk(T, up);
     }
     var rad = T.rad != null ? T.rad : h / 2;
     var key = T.l.toFixed(2) + '|' + T.t.toFixed(2) + '|' + w.toFixed(2) + '|' + h.toFixed(2) + '|' + op.toFixed(3) + '|'
@@ -1309,6 +1326,57 @@
     if (T.near) { T.near.removeAttribute('data-lg-near'); }
     T.near = el;
     if (el) { el.setAttribute('data-lg-near', ''); }
+  }
+
+  /**
+   * 玻璃底下的字（照 iOS 26 的标签栏）：被玻璃盖住多少，就放大多少、变粗多少、换成选中色多少。
+   * 盖住的比例按滑块此刻的两条边和每一项的位置算——和玻璃的移动是同一个连续量：飞过两项之间时，
+   * 一枚字一边缩回、一边褪色，另一枚一边放大、一边上色，不是到了中点「啪」地换一枚。
+   * 放大 = 盖住的比例 × 浮起的程度：只有浮起的透镜才放大（落下时字跟着玻璃一起缩回）；颜色、粗细只看盖住多少。
+   * 放大写在独立的 scale 属性上，不碰 transform（悬停透镜的放大写在那里）；颜色和粗细由样式表按 --lg-z 算，
+   * 这样「精简」档拖动时（不浮起）字照样跟着滑块换色。
+   */
+  function segInk(T, up) {
+    var on = segInkMode(T);
+    if (!on && up < 0.002) { if (T.zS) { segInkOff(T); } return; }
+    if (!T.zS || T.zOld) {
+      var old = T.zS || [], S = segStops(T) || [], els = [], j;
+      T.zS = S; T.zOld = false;
+      for (j = 0; j < S.length; j++) { els.push(S[j].el); }
+      // 重量以后不在了的项（页面整片重画过）：复原
+      for (j = 0; j < old.length; j++) {
+        if (els.indexOf(old[j].el) < 0) { old[j].el.style.scale = ''; old[j].el.style.removeProperty('--lg-z'); }
+      }
+      T.mag = clamp(parseFloat(win.getComputedStyle(T.surf).getPropertyValue('--lg-seg-mag')) || 0, 0, 0.4);
+    }
+    var u = clamp(up, 0, 1.3);
+    for (var i = 0; i < T.zS.length; i++) {
+      var it = T.zS[i];
+      var z = clamp((Math.min(T.r, it.x + it.w) - Math.max(T.l, it.x)) / (it.w || 1), 0, 1);
+      var sc = 1 + T.mag * z * u, key = z.toFixed(3) + '|' + sc.toFixed(4);
+      if (key === it.key) { continue; }
+      it.key = key;
+      it.el.style.setProperty('--lg-z', z.toFixed(3));
+      it.el.style.scale = sc > 1.0005 ? sc.toFixed(4) : '';
+    }
+  }
+  /**
+   * 字的选中样子跟着玻璃走（surf 上的 data-lg-ink）：拖着、浮着飞，以及松手后页面还没把选中改过来的那一小会儿。
+   * 最后这一段不能漏：玻璃已经落定、页面的 click 还没处理完的那一两帧里，样式表会按页面的旧选中画——
+   * 原来那一项一下变粗变色、玻璃底下那一项反而变回普通，闪一下。
+   */
+  function segInkMode(T) {
+    var on = !!(T.drag && T.drag.moved) || !!T.fly || !!(T.pend && T.pend.el === T.cur && !isOn(T.cur));
+    if (on !== T.surf.hasAttribute('data-lg-ink')) {
+      if (on) { T.surf.setAttribute('data-lg-ink', ''); } else { T.surf.removeAttribute('data-lg-ink'); }
+    }
+    return on;
+  }
+  function segInkOff(T) {
+    var S = T.zS;
+    T.zS = null;
+    if (!S) { return; }
+    for (var i = 0; i < S.length; i++) { S[i].el.style.scale = ''; S[i].el.style.removeProperty('--lg-z'); }
   }
 
   /** 拖动收场：撤掉拖动状态与指针捕获 */
@@ -1578,6 +1646,7 @@
     dragStop(T);
     if (!D.moved) {                                  // 只是按了一下：点击照常交给页面（按的是别的项，滑块已经先到了）
       if (T.cur && !isOn(T.cur)) { T.pend = { el: T.cur, until: Date.now() + 1200 }; setTimeout(scheduleSync, 1250); }
+      segInkMode(T);
       return;
     }
     // 指针被系统收走（pointercancel）时按此刻的位置落定，不算甩
@@ -1593,6 +1662,9 @@
     if (T.fly) { T.cl = T.cr = SP.fly; T.S = D.S; }
     T.gl = to.x; T.gr = to.x + to.w; T.cur = to.el;
     segNear(T, to.el);
+    // 现在就记下「替用户选了这一项」：下面的 click 要等到下一个任务，这之间字的样子不能退回页面的旧选中
+    if (!isOn(to.el)) { T.pend = { el: to.el, until: Date.now() + 1200 }; }
+    segInkMode(T);
     eatClick = T.surf;
     setTimeout(function () {
       eatClick = null;
