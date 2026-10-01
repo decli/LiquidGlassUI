@@ -111,6 +111,9 @@
   --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .95), inset 0 -1px 2px rgba(15, 23, 42, .07);
   /* 折射的玻璃边上那层很淡的乳白（散射）。深色底上同样的白要淡一半，不然边上一圈发灰 */
   --lg-scatter: #ffffff;
+  /* 玻璃导航条停着时的选中项：一块平胶囊，浅色里比玻璃略深一点、深色里略亮一点，只有一道很淡的顶边高光 */
+  --lg-tab-sel: linear-gradient(180deg, rgba(23, 32, 42, .085), rgba(23, 32, 42, .06));
+  --lg-tab-sel-sh: inset 0 1px 0 rgba(255, 255, 255, .55), inset 0 0 0 .5px rgba(23, 32, 42, .04);
   /* 分段开关按住时浮起的那块清玻璃：里面不铺色；一圈极淡的描边 + 浮起的影子，左上、右下两道斜对角高光 */
   --lg-lift-sh: 0 0 0 .5px rgba(15, 23, 42, .14), 0 8px 18px -8px rgba(15, 23, 42, .3);
   --lg-lift-spec: conic-gradient(from 0deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, .2) 70deg, rgba(255, 255, 255, .2) 100deg,
@@ -175,6 +178,8 @@
   --lg-hl-rim: linear-gradient(165deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .1) 30%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .22));
   --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 -1px 2px rgba(0, 0, 0, .3);
   --lg-scatter: rgba(255, 255, 255, .45);
+  --lg-tab-sel: linear-gradient(180deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .075));
+  --lg-tab-sel-sh: inset 0 1px 0 rgba(255, 255, 255, .13), inset 0 0 0 .5px rgba(255, 255, 255, .05);
   --lg-lift-sh: 0 0 0 .5px rgba(255, 255, 255, .1), 0 8px 18px -8px rgba(0, 0, 0, .5);
   --lg-lift-spec: conic-gradient(from 0deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .05) 70deg, rgba(255, 255, 255, .05) 100deg,
     rgba(255, 255, 255, .62) 140deg, rgba(255, 255, 255, .05) 185deg, rgba(255, 255, 255, .05) 265deg, rgba(255, 255, 255, .78) 310deg, rgba(255, 255, 255, .16));
@@ -239,6 +244,8 @@
     --lg-hl-rim: linear-gradient(165deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .1) 30%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .22));
     --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 -1px 2px rgba(0, 0, 0, .3);
     --lg-scatter: rgba(255, 255, 255, .45);
+    --lg-tab-sel: linear-gradient(180deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .075));
+    --lg-tab-sel-sh: inset 0 1px 0 rgba(255, 255, 255, .13), inset 0 0 0 .5px rgba(255, 255, 255, .05);
     --lg-lift-sh: 0 0 0 .5px rgba(255, 255, 255, .1), 0 8px 18px -8px rgba(0, 0, 0, .5);
     --lg-lift-spec: conic-gradient(from 0deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .05) 70deg, rgba(255, 255, 255, .05) 100deg,
       rgba(255, 255, 255, .62) 140deg, rgba(255, 255, 255, .05) 185deg, rgba(255, 255, 255, .05) 265deg, rgba(255, 255, 255, .78) 310deg, rgba(255, 255, 255, .16));
@@ -437,7 +444,7 @@ select.lg-field {
 }
 /* 有液态滑块时选中项自己不画底，底是滑块 */
 .lg-seg[data-lg-slider-on] > button[aria-pressed="true"], .lg-seg[data-lg-slider-on] > button[aria-selected="true"] {
-  background: transparent; box-shadow: none; cursor: grab;
+  background: transparent; box-shadow: none;
 }
 /* 按钮宽度按粗体留：脚本把字写进 data-lg-label，::after 里放一份隐形的粗体撑宽——选中变粗时不把旁边的项挤开 */
 .lg-seg > button[data-lg-label] { display: inline-grid; align-content: center; justify-items: center; }
@@ -446,6 +453,7 @@ select.lg-field {
 }
 /* 能按住拖（§16 的浮起透镜）：不选中文字；竖着划照样滚页面 */
 .lg-seg[data-lg-slider-on] { -webkit-user-select: none; user-select: none; touch-action: pan-y; }
+.lg-seg[data-lg-slider-on] > button { cursor: grab; }
 .lg-seg[data-lg-drag], .lg-seg[data-lg-drag] > button { cursor: grabbing; }
 /* 拖动中：离滑块最近的那一项先变成选中的样子，原来选中的那一项退回普通 */
 .lg-seg[data-lg-drag] > button { color: var(--lg-ink-2); font-weight: 400; }
@@ -455,6 +463,24 @@ select.lg-field {
 .lg-seg--sm > button { height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600; }
 .lg-seg--block { display: flex; }
 .lg-seg--block > button { flex: 1 1 0; padding: 0; }
+/* 玻璃导航条（iOS 26 的标签栏）：浮在内容上面的一整块玻璃，写成 class="lg-glass lg-seg lg-seg--glass"。
+   项是图标在上、字在下，等宽铺满（宽度不随字变，选中变色不挤动旁边）；选中项是一块平胶囊 + 主色的图标和字。
+   有脚本时：点一下滑块浮着滑过去；按住任一项浮起成一块会折射的透镜，能拖（§16）；整条的边把底下滚过的内容弯一弯。 */
+.lg-seg--glass { display: flex; padding: 4px; border-radius: 999px; background: transparent; --lg-b: 16px; }
+.lg-seg--glass > button {
+  flex: 1 1 0; min-width: 0; height: auto; min-height: 50px; padding: 5px 10px; border-radius: 999px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 11.5px; font-weight: 600; line-height: 1.2; color: var(--lg-ink-2);
+}
+.lg-seg--glass > button + button { margin-left: 0; }
+.lg-seg--glass > button > svg { width: 20px; height: 20px; margin-bottom: 3px; flex: none; }
+.lg-seg--glass > button > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.lg-seg--glass > button[aria-pressed="true"], .lg-seg--glass > button[aria-selected="true"] {
+  background: var(--lg-tab-sel); box-shadow: var(--lg-tab-sel-sh); color: var(--lg-accent);
+}
+.lg-seg--glass > .lg-thumb-seg { background: var(--lg-tab-sel); box-shadow: var(--lg-tab-sel-sh); }
+.lg-seg--glass[data-lg-drag] > button { color: var(--lg-ink-2); font-weight: 600; }
+.lg-seg--glass[data-lg-drag] > button[data-lg-near] { color: var(--lg-accent); }
 
 /* ══ 9 侧栏 ═════════════════════════════════════════════════════════════
  * 一块浮在页面底上的玻璃板：离窗口边 12px、圆角 24px。侧栏自己不滚，中间的 .lg-nav 滚——
@@ -773,8 +799,14 @@ html[data-lg-tier="l2"] .lg-lens > .lg-lens-ref, html[data-lg-tier="l3"] .lg-len
 .lg-lens[data-onsel] > .lg-lens-light {
   background: radial-gradient(calc(64px + 110px * var(--p, 0)) circle at var(--mx, 50%) var(--my, 50%), rgba(255, 255, 255, .46), rgba(255, 255, 255, 0) 72%);
 }
-/* 整行形态（表格行一类）：只要一块垫底的亮板 */
+/* 整行形态（表格行一类）：一块垫底的亮板 + 跟着指针走的指尖光（和按钮同一套悬停动作）。
+   光用白按钮那一份（--lg-sec-glow：浅色带一点主色，白光打在白板上看不出来），压扁成一道竖着的光，按下时放大；
+   只在指针在的时候亮——键盘走到这一行时光会停在正中，宽行正中一团光像污渍 */
 .lg-lens-under > .lg-lens-sh { box-shadow: var(--lg-hl-edge), 0 1px 1px rgba(15, 23, 42, .04), 0 4px 10px -6px rgba(15, 23, 42, .22); }
+.lg-lens.lg-lens-under > .lg-lens-light {
+  background: radial-gradient(calc(150px + 90px * var(--p, 0)) 80px at var(--mx, 50%) var(--my, 50%), var(--lg-sec-glow), transparent 72%);
+}
+.lg-lens-under:not([data-pointer]) > .lg-lens-light { display: none; }
 .lg-lens-under > .lg-lens-glass { background: var(--lg-hl-under-tint); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .lg-lens-under[data-onsel] > .lg-lens-glass { background: var(--lg-hl-onsel-tint); }
 html[data-lg-tier="l0"] .lg-lens > .lg-lens-glass { background: var(--lg-hl-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }

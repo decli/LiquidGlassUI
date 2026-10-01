@@ -16,7 +16,8 @@ description: >-
 
 一套照 Apple Liquid Glass 做的网页材质与组件：控制层（侧栏、页头胶囊、弹出层、工具条、提示）是会折射的玻璃，
 内容层（卡片、表格）是不透光的「实心厚玻璃」；悬停是一颗会流动的清玻璃透镜，选中是一块前沿先到、后沿后到的液态滑块；
-分段开关像 iOS 26 的标签栏，按住选中项它浮起成一块盖在字上面、会折射的透镜，能拖、拖过两端像橡皮筋。
+分段开关像 iOS 26 的标签栏，按住任一项它浮起成一块盖在字上面、会折射的透镜，能拖、拖过两端像橡皮筋；
+还有一条浮在内容上面的玻璃导航条（`.lg-seg--glass`，图标 + 字）。
 玻璃边的折射照 iOS 26：边上那一圈把背后的内容放大、轻微模糊、泛一层乳白和一点彩边，正中一个像素都不动。
 不需要构建、不依赖任何库、不走 CDN；不加载脚本页面照样能用。
 
@@ -36,7 +37,7 @@ description: >-
 | `references/design-spec.md` | 定稿的设计规范：令牌、每个组件的尺寸、动效参数、三档定义 | 做任何视觉决定时 |
 | `references/integration.md` | 接入指南：组件类、data 属性、配置、接口、框架、CSP、检查清单 | 接进项目时 |
 | `references/principles.md` | 技术原理：玻璃怎么搭、折射的位移曲线与滤镜链、九宫格、HDR、弹簧、分段开关的浮起与拖动、分档、背景根 | 改算法或解释原理时 |
-| `references/pitfalls.md` | 33 个「不报错、只是静静地坏掉」的坑，按症状查 | 出现诡异现象时先查 |
+| `references/pitfalls.md` | 35 个「不报错、只是静静地坏掉」的坑，按症状查 | 出现诡异现象时先查 |
 | `references/design-decisions.md` | 每轮评审指出了什么、为什么这样改 | 用户想改风格、或你想「改回」某个做法之前 |
 
 ## 工作流程
@@ -105,6 +106,8 @@ node scripts/shoot.mjs --url http://localhost:8080/ [--key 你的档位存储键
 - **「背景是图片 / 视频，想看到折射」**：给侧栏、页头胶囊加 `data-lg-refract`（背后有内容时折射才有意义）；注意 pitfalls.md #16 的性能。
 - **「在 React / Vue 里用」**：脚本全局加载一次即可，状态用 `aria-*` 表达；见 integration.md §9。
 - **「换成别的品牌色 / 暗色为主」**：只改令牌；改完跑 `check.mjs`（它会核对两块深色令牌一致）。
+- **「要 iOS 26 那样的底部导航条」**：`<nav class="lg-glass lg-seg lg-seg--glass">`，项是 `<button aria-pressed>` 里一个图标 + 一个 `<span>`，
+  粘在能滚的内容底部（integration.md §7.3）；无头截图里矮条看着没模糊是无头浏览器的问题（pitfalls.md #34），要在实机上看。
 - **「要 iOS 26 标签栏那种按住浮起、能拖的选项」**：直接用 `.lg-seg`（或 `data-lg-slider` + `data-lg-kind="seg"`），已经带了；
   页面的点击处理要能处理 `element.click()`（拖完松手脚本替用户点一下落到的那一项），见 integration.md §7.3。
 - **「要一个静态的、不跑脚本的折射」**：`python3 scripts/displacement_map.py --w 宽 --h 高 --svg` 生成一段滤镜贴进页面（仅 Chromium，元素尺寸必须固定）。

@@ -3,9 +3,9 @@
  * 用真浏览器把演示页（或你自己的页面）拍下来，并验三档是不是真的分得开。
  *
  *   node scripts/shoot.mjs                     拍演示页的整套截图到 ./shots/，并做三档校验与一致性校验
- *                                              （每个能点的元素悬停都有反馈；所有玻璃同一种材质、并排的胶囊不一深一浅）、
+ *                                              （每个能点的元素悬停都有反馈、都有跟着指针走的指尖光；所有玻璃同一种材质、并排的胶囊不一深一浅）、
  *                                              折射校验（玻璃正中和不折射时逐像素一样、边上确实在弯）、
- *                                              分段开关校验（按住浮起、拖、甩、橡皮筋、点、精简档）
+ *                                              分段开关校验（按住浮起、按住别的项、拖、甩、橡皮筋、点、玻璃导航条、精简档）
  *   node scripts/shoot.mjs --out design        换输出目录
  *   node scripts/shoot.mjs --check             只做校验，不留截图
  *   node scripts/shoot.mjs --url http://localhost:3000/  拍你自己的页面：浅 / 深 × 三档 6 张全屏，再做同样的三档校验
@@ -130,17 +130,25 @@ async function consistencyCheck() {
     const o = await open({ mode: 'full' });
     const p = o.page;
     await prep(p);
+    // 不只看第一屏：每一个都先滚到视口正中再悬停（表格行在第一屏里被粘住的保存条挡着，以前一行都没验到）
     const n = await p.evaluate(sc => {
       const root = sc ? document.querySelector(sc) : document;
       const els = [...root.querySelectorAll('button, a[href], [role="option"], [role="menuitem"], [role="menuitemradio"], tbody tr')].filter(e => {
         const r = e.getBoundingClientRect();
-        if (!(r.width > 4 && r.height > 4 && r.top >= 0 && r.bottom <= innerHeight) || e.disabled || e.closest('[hidden]')) { return false; }
-        const hit = document.elementFromPoint(r.left + r.width * 0.4, r.top + r.height / 2);   // 鼠标真点得到它（没被粘住的保存条之类盖住）
-        return !!hit && (hit === e || e.contains(hit));
+        return r.width > 4 && r.height > 4 && !e.disabled && !e.closest('[hidden]');
       });
       els.forEach((e, i) => e.setAttribute('data-fb', i));
       return els.length;
     }, scope || null);
+    // 滚到正中以后鼠标真点得到它（没被粘住的保存条之类盖住）才验
+    const reach = i => p.evaluate(i => {
+      const e = document.querySelector(`[data-fb="${i}"]`);
+      e.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const r = e.getBoundingClientRect();
+      if (r.top < 0 || r.bottom > innerHeight) { return false; }
+      const hit = document.elementFromPoint(r.left + r.width * 0.4, r.top + r.height / 2);
+      return !!hit && (hit === e || e.contains(hit));
+    }, i);
     const snap = i => p.evaluate(i => {
       const e = document.querySelector(`[data-fb="${i}"]`), cs = getComputedStyle(e), bs = getComputedStyle(e, '::before');
       const r = e.getBoundingClientRect();
@@ -150,22 +158,36 @@ async function consistencyCheck() {
         const ox = Math.max(0, Math.min(q.right, r.right) - Math.max(q.left, r.left)), oy = Math.max(0, Math.min(q.bottom, r.bottom) - Math.max(q.top, r.top));
         return ox * oy > 0.5 * r.width * r.height;
       });
-      return { lens, look: [cs.transform, cs.boxShadow, cs.backgroundImage, cs.backgroundColor, bs.backgroundImage].join('|'),
+      // 指尖光：盖着它的透镜里那层光亮着，或者它自己（按钮、胶囊）在写跟着指针走的 --mx
+      const glow = [...document.querySelectorAll('.lg-lens')].some(l => {
+        const li = l.querySelector('.lg-lens-light');
+        if (!li || !l.parentElement.contains(e) || parseFloat(l.style.getPropertyValue('--a') || 0) < 0.5) { return false; }
+        const q = l.getBoundingClientRect(), ls = getComputedStyle(li);
+        const ox = Math.max(0, Math.min(q.right, r.right) - Math.max(q.left, r.left)), oy = Math.max(0, Math.min(q.bottom, r.bottom) - Math.max(q.top, r.top));
+        return ox * oy > 0.5 * r.width * r.height && ls.display !== 'none' && /radial-gradient/.test(ls.backgroundImage);
+      }) || !!(e.closest('.lg-btn, .lg-chip, [data-lg-glow]') || e).style.getPropertyValue('--mx');
+      return { lens, glow, look: [cs.transform, cs.boxShadow, cs.backgroundImage, cs.backgroundColor, bs.backgroundImage].join('|'),
         label: (e.getAttribute('aria-label') || e.textContent || e.tagName).trim().replace(/\s+/g, ' ').slice(0, 16) };
     }, i);
+    let tested = 0;
     for (let i = 0; i < n; i++) {
-      await p.mouse.move(1436, 4); await p.waitForTimeout(260);
+      await p.mouse.move(1436, 4);
+      if (!(await reach(i))) { continue; }
+      await p.waitForTimeout(260);
       const before = await snap(i);
       const b = await p.locator(`[data-fb="${i}"]`).boundingBox();
       await p.mouse.move(b.x + b.width * 0.4, b.y + b.height / 2, { steps: 4 });
-      await p.waitForTimeout(450);
-      const after = await snap(i);
+      // 透镜是流过去的：从鼠标进来时路过的那一项流到这一项要一会儿，无头浏览器帧率又低——等它到了再判断（最多 1.6 秒）
+      let after = await snap(i);
+      for (let k = 0; k < 8 && !after.glow; k++) { await p.waitForTimeout(200); after = await snap(i); }
+      tested++;
       if (!after.lens && after.look === before.look) { failures.push(`一致性（${name}）：「${before.label}」悬停没有任何反馈`); }
+      else if (!after.glow) { failures.push(`一致性（${name}）：「${before.label}」悬停没有跟着指针走的指尖光（别的按钮、菜单项都有）`); }
     }
-    total += n;
+    total += tested;
     await close(o, 'consistency ' + name);
   }
-  console.log(`  悬停反馈：${total} 个能点的元素逐个悬停过`);
+  console.log(`  悬停反馈：${total} 个能点的元素逐个悬停过（都要有反馈，而且都有指尖光）`);
 
   // 玻璃材质：宿主背景透明；同一类玻璃的玻璃层一样；并排两颗胶囊的底色像素一致
   const o = await open({ mode: 'full' });
@@ -335,6 +357,34 @@ async function segCheck() {
   if (s.fly || s.lifted || await sel(p) !== 3) { fail('点别的项：到了应当落下、选中那一项'); }
   await close(o, 'seg band');
 
+  // 按住别的项（iOS 26：手指按在哪一项，玻璃就到哪一项底下）：还没松手就浮起、飞到手指下面；松手才交给页面去选
+  o = await prep(); p = o.page; B = await at(p);
+  await p.mouse.move(B[2].x, B[2].y); await p.mouse.down(); await p.waitForTimeout(600);
+  s = await st(p);
+  const under = await p.evaluate(s => { const seg = document.querySelector(s), T = seg.__lgT, b = seg.querySelectorAll(':scope > button')[2];
+    return Math.abs((T.l + T.r) / 2 - (b.offsetLeft + b.offsetWidth / 2)) < 2; }, SEG);
+  if (!s.lifted || !under) { fail('按住没选中的项：滑块应当浮起、飞到手指下面：' + JSON.stringify({ lifted: s.lifted, under })); }
+  if (await sel(p) !== 0) { fail('按住没选中的项、还没松手：不该已经换了选中'); }
+  // 接着拖回第二项松手：从别的项起拖也行
+  await p.mouse.move(B[1].x, B[1].y, { steps: 12 }); await p.waitForTimeout(200);
+  await p.mouse.up(); await p.waitForTimeout(1200);
+  s = await st(p);
+  if (await sel(p) !== 1 || s.lifted) { fail(`从没选中的项拖到第二项松手：应当选中第二项、透镜落下，实际第 ${await sel(p) + 1} 项`); }
+  await close(o, 'seg press other');
+
+  // 玻璃导航条：按住第一项拖到第三项，松手选中第三项；拖动中透镜浮起、在折射
+  o = await prep(); p = o.page;
+  await p.locator('.demo-tabbar').evaluate(e => e.closest('.demo-phone').scrollIntoView({ block: 'center' }));
+  await p.waitForTimeout(200);
+  const T3 = await p.locator('.demo-tabbar > button').evaluateAll(xs => xs.map(x => { const r = x.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }));
+  await p.mouse.move(T3[0].x, T3[0].y); await p.mouse.down();
+  await p.mouse.move(T3[2].x, T3[2].y, { steps: 20 }); await p.waitForTimeout(300);
+  const tb = await p.evaluate(() => { const l = document.querySelector('.demo-tabbar .lg-lift'); return !!l && l.hasAttribute('data-up') && /url/.test(getComputedStyle(l.querySelector('.lg-lift-ref')).backdropFilter); });
+  await p.mouse.up(); await p.waitForTimeout(1000);
+  const tsel = await p.evaluate(() => [...document.querySelectorAll('.demo-tabbar > button')].findIndex(x => x.getAttribute('aria-pressed') === 'true'));
+  if (!tb || tsel !== 2) { fail('玻璃导航条：按住拖到第三项，透镜应当浮起并折射、松手选中第三项：' + JSON.stringify({ lifted: tb, sel: tsel })); }
+  await close(o, 'tabbar');
+
   o = await prep('lite'); p = o.page; B = await at(p);
   await p.mouse.move(B[0].x, B[0].y); await p.mouse.down();
   await p.mouse.move(B[1].x, B[1].y, { steps: 12 }); await p.waitForTimeout(200);
@@ -343,7 +393,7 @@ async function segCheck() {
   await p.mouse.up(); await p.waitForTimeout(300);
   if (await sel(p) !== 1) { fail('精简档：应当照样能拖着换选中'); }
   await close(o, 'seg lite');
-  console.log('  分段开关：按住浮起、拖、甩、橡皮筋、点、精简档都过了一遍');
+  console.log('  分段开关：按住浮起、拖、甩、橡皮筋、点、按住别的项、玻璃导航条、精简档都过了一遍');
 }
 
 if (!checkOnly) { await mkdir(outDir, { recursive: true }); }
@@ -480,6 +530,15 @@ if (userUrl) {
         await p.mouse.move((b[1].x + b[2].x) / 2 - 6, b[0].y, { steps: 14 });
         await p.waitForTimeout(500);
       }, null, async p => { const b = await p.locator('.lg-seg[aria-label="时间范围"]').boundingBox(); return { x: b.x - 18, y: b.y - 18, width: b.width + 36, height: b.height + 36 }; }]),
+      ...['light', 'dark'].map(theme => [theme === 'light' ? 'tabbar@2x.png' : 'tabbar-dark@2x.png', { dpr: 2, theme }, async p => {
+        // 玻璃导航条：内容往上滚一点，按住「概览」往右拖到「交给 AI」上：透镜浮起、把字和图标放大弯折
+        await p.locator('.demo-phone').evaluate(e => { e.scrollIntoView({ block: 'center' }); e.scrollTop = 60; });
+        await p.waitForTimeout(300);
+        const b = await p.locator('.demo-tabbar > button').evaluateAll(xs => xs.map(x => { const r = x.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }));
+        await p.mouse.move(b[0].x, b[0].y); await p.mouse.down();
+        await p.mouse.move((b[0].x + b[1].x) / 2 + 30, b[0].y, { steps: 14 });
+        await p.waitForTimeout(500);
+      }, null, async p => { const b = await p.locator('.demo-phone').boundingBox(); return { x: b.x, y: b.y + b.height - 130, width: b.width, height: 130 }; }]),
       ['login.png', { query: '?view=login' }, async p => { await p.waitForTimeout(300); }],
       ['login-dark.png', { theme: 'dark', query: '?view=login' }, async p => { await p.waitForTimeout(300); }]
     ];

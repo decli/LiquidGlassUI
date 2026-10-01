@@ -69,6 +69,7 @@
 | `.lg-glass.lg-chip` | 页头上可按的玻璃胶囊 | 里面可放 `.lg-dot`、`.lg-chip-muted`、`.lg-chip-strong`、`.lg-chip-caret`、`.lg-chip-ico`、`.lg-kbd`；危险态加 `.lg-chip--danger` |
 | `.lg-field` | 输入框 / 下拉 / 多行 | `input`、`select`、`textarea` 都行；标签用 `.lg-label` |
 | `.lg-seg` / `--sm` / `--block` | 分段开关（多选一） | 直接子元素是 `<button aria-pressed>` |
+| `.lg-glass.lg-seg.lg-seg--glass` | 玻璃导航条（iOS 26 的标签栏） | 直接子元素是 `<button aria-pressed>`，里面一个图标（`<svg>`）+ 一个 `<span>` 字；放在能滚的内容底部（`position: sticky; bottom: …` 或 `fixed`），见 7.3 |
 | `.lg-glass.lg-sidebar` | 侧栏 | 折叠：`data-collapsed="true"` |
 | `.lg-nav` | 侧栏菜单区（滚动的那一层） | 里面交替放 `.lg-nav-group` 与 `.lg-nav-plate` |
 | `.lg-nav-group` | 组标题按钮 | `aria-expanded` + `aria-controls`；子元素 `.lg-nav-group-caret`（svg）、`-title`、`-badge`、`-count`；危险组加 `--danger` |
@@ -98,7 +99,7 @@
 | `data-lg-pad="3"` | 同上 | 透镜比项大多少像素（有底色的胶囊用 2–3，露出一圈玻璃） |
 | `data-lg-mag="0.04"` | 同上 | 被盖住的项放大多少：窄项 0.03–0.05，宽列表项 ≤ 0.015，整行 0 |
 | `data-lg-rad="10"` | 同上 | 透镜圆角；不写就照项自己的圆角 |
-| `data-lg-under` | 同上 | 整行形态：只垫亮板，不折射、不跟手、没有光斑（表格行一类） |
+| `data-lg-under` | 同上 | 整行形态（表格行一类）：垫亮板，指尖光跟着指针走；不放大、不折射、不跟手位移，按下往里收一点 |
 | `data-lg-slider="项的选择器"` | 多选一的容器 | 选中项底下一块液态滑块。不给值时项是 `.lg-item` |
 | `data-lg-kind="seg|nav|cursor"` | 同上 | 滑块长相：白玻璃 / 蓝色（危险项红色）/ 主色浅玻璃光标。`seg` 还能按住浮起、拖（第 7.3 节） |
 | `data-lg-refract` 或 `="边宽 [最外缘位移]"` | 一块 `.lg-glass` | 打开折射（只在 l2 / l3 生效）：边上那一圈放大、模糊、泛一点乳白和彩边，正中原样。不给值按尺寸取（边宽 = 短边 × 0.2，夹在 10–24px；位移 = 0.45 × 边宽）。老写法「边宽 隆起 厚度」三个数照样认，第三个数当位移用 |
@@ -207,17 +208,34 @@ document.addEventListener('lg:modechange', function (e) {
 
 **按住浮起、拖**（iOS 26 标签栏那样，kind 为 `seg` 的滑块都有）：
 
-- 按住选中项，滑块浮起成一块清玻璃透镜，盖在字上面、边上折射底下的字（Chrome / Edge 的「完整」档；别的浏览器上滑块放大一点）。
-- 按住横向拖：透镜跟着手指走，最近的那一项标上 `data-lg-near`（样式表让它先变成选中的样子）；松手落到最近一项，
+- 按住任一项，滑块浮起成一块清玻璃透镜，盖在字上面、边上折射底下的字（Chrome / Edge 的「完整」档；别的浏览器上滑块放大一点）；
+  按的不是选中项，滑块先飞到手指下面，选不选等松手时的点击交给页面。
+- 按住横向拖（从哪一项起拖都行）：透镜跟着手指走，最近的那一项标上 `data-lg-near`（样式表让它先变成选中的样子）；松手落到最近一项，
   快速一甩往甩的方向最多再走一格；拖过两端整条像橡皮筋被拉长。
 - **松手后脚本替用户点一下落到的那一项**（`element.click()`），页面的点击处理照常运行、照常改 `aria-pressed`——
   所以页面的点击处理要能处理 `click()`（绑在按钮上或委托在容器上都行；别只听 `pointerup` / `mousedown`）。
-  页面不接受这次选中，滑块就回到真正选中的那一项。浏览器在拖完后自己补的那一下 click 会被吞掉。
+  页面不接受这次选中，滑块就回到真正选中的那一项（页面异步改选中的，滑块先在新位置等 1.2 秒）。浏览器在拖完后自己补的那一下 click 会被吞掉。
 - 拖动中容器上有 `data-lg-drag`；拖过两端时脚本往容器上写 `transform`（拉长、弹回），弹完清掉。容器自己的 `transform` 会在这几百毫秒里被盖住。
 - 按钮里只有文字时，脚本把字写进 `data-lg-label`，样式表按粗体留宽度（选中变粗不挤动旁边的项）；按钮里有图标等元素时不动它的排版。
 - 容器挂在一个带 `filter` / `backdrop-filter` / `mask` 的祖先里时不出透镜（隔着背景根会画成一块暗方块，见 pitfalls.md #28）；
   玻璃面板（`.lg-glass`）里没问题——它的毛玻璃画在伪元素上。
 - 窄屏上要是还会折成多行，就不能横着拖了（只能点）。
+
+**玻璃导航条**（iOS 26 的标签栏）：同一套交互，换成浮在内容上面的一整块玻璃、图标 + 字、等宽铺满。放在能滚的内容底部：
+
+```html
+<div class="my-scroller">            <!-- 能滚的内容；导航条是它最后一个子元素 -->
+  …内容…
+  <nav class="lg-glass lg-seg lg-seg--glass" role="group" aria-label="主导航" style="position: sticky; bottom: 10px; z-index: 2">
+    <button type="button" aria-pressed="true"><svg …></svg><span>概览</span></button>
+    <button type="button" aria-pressed="false"><svg …></svg><span>交给 AI</span></button>
+    <button type="button" aria-pressed="false"><svg …></svg><span>设置</span></button>
+  </nav>
+</div>
+```
+
+`.lg-glass` 自带 `position: relative; z-index: 0`，要粘住就用更具体的选择器（或内联样式）改成 `sticky` / `fixed`。
+选中项的图标和字是主色；整条的边默认不折射，背后有大图想看到边缘弯折就加 `data-lg-refract="9 4"`。
 
 ### 7.4 三档开关
 

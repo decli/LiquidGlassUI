@@ -104,7 +104,7 @@
    *   pad   透镜比项大一圈（有底色的胶囊用，边上露出玻璃）
    *   mag   被透镜盖住的项放大多少：窄项 3–5%；宽列表项 ≤ 1.5%（放大以中心为原点，500px 宽放大 2% 左边的字就跳 5px）；整行 0
    *   rad   透镜圆角；不写就照那一项自己的圆角
-   *   under 表格一类整行：只垫一块亮板，不折射、不跟手、没有光斑
+   *   under 表格一类整行：垫一块亮板，指尖光跟着指针走；不放大、不折射、不跟手位移，按下往里收一点（不鼓出去）
    * 折射（refract）：
    *   bezel 玻璃边宽（px）；depth 最外缘位移（px，缺省 0.45 × bezel）；disp 色散（缺省 0.08）；scatter 边上乳白的浓度（缺省 0.05）
    * 滑块（slider）kind 为 seg 的（分段开关）还能按住拖：按住选中项它浮起成一块会折射的透镜，见 §5.5。
@@ -127,12 +127,15 @@
       { sel: '.lg-menu', bezel: 18, depth: 8 },
       { sel: '.lg-panel', bezel: 24, depth: 11 },
       { sel: '.lg-toolbar--sticky', bezel: 14, depth: 6 }
+      // 玻璃导航条（.lg-seg--glass）整条的边默认不折射：条只有 58px 高，边上那一圈占得太多，实测是一圈发灰的厚边；
+      // 折射留给按住时浮起的那块透镜。要开就在条上写 data-lg-refract="9 4"
     ],
     hdr: [
       { sel: '.lg-sidebar', spots: 'top bottom' },
       { sel: '.lg-dialog', spots: 'top bottom' },
       { sel: '.lg-panel', spots: 'top' },
-      { sel: '.lg-chip', spots: 'top' }
+      { sel: '.lg-chip', spots: 'top' },
+      { sel: '.lg-seg--glass', spots: 'top' }
     ]
   };
   var LENS = CFG.lens || PRE.lens || [];
@@ -568,19 +571,24 @@
   /* ══ 3 动画：一个 requestAnimationFrame 循环带所有弹簧 ══════════════════
    *
    * 弹簧参数照 Apple「时长 + 回弹」的换算：刚度 k = (2π/时长)²，阻尼 c = 4π(1−回弹)/时长。
-   * 半隐式欧拉积分；换目标时保留速度，所以中途改道不会顿一下。
+   * 半隐式欧拉积分，每帧拆成不超过 4ms 的小步（慢帧里刚度高的弹簧不发散）；换目标时保留速度，所以中途改道不会顿一下。
    */
   function spring(dur, bounce) { return { k: Math.pow(2 * Math.PI / dur, 2), d: 4 * Math.PI * (1 - bounce) / dur }; }
   var SP = {
     pos: spring(0.38, 0.22), fade: spring(0.3, 0), press: spring(0.26, 0.35),
     lead: spring(0.3, 0.26), lag: spring(0.52, 0.16), same: spring(0.42, 0.18),
     // 分段开关：浮起带一点回弹、落下不回弹；橡皮筋弹回时冲过头压扁一下
-    up: spring(0.38, 0.3), down: spring(0.26, 0), band: spring(0.5, 0.5)
+    up: spring(0.38, 0.3), down: spring(0.26, 0), band: spring(0.5, 0.5),
+    // 拖着的时候滑块追手指：很快、不回弹（直接写位置的话，按下后立刻拖，滑块会从半路一下跳到手指下面）
+    drag: spring(0.12, 0)
   };
+  // 一帧拆成不超过 4ms 的小步：刚度高的弹簧（拖动时追手指的那根）在一步 34ms 的慢帧里会发散，一下飞出几百万像素
   function step(o, p, v, target, c, dt) {
-    var acc = -c.k * (o[p] - target) - c.d * o[v];
-    o[v] += acc * dt;
-    o[p] += o[v] * dt;
+    var n = Math.ceil(dt / 0.004), h = dt / n, i;
+    for (i = 0; i < n; i++) {
+      o[v] += (-c.k * (o[p] - target) - c.d * o[v]) * h;
+      o[p] += o[v] * h;
+    }
   }
 
   var anims = [], rafId = 0, lastT = 0, frames = [];
@@ -679,9 +687,10 @@
     var s = doc.createElement('span');
     s.className = 'lg-lens' + (L.cfg.under ? ' lg-lens-under' : '');
     s.setAttribute('aria-hidden', 'true');
-    // 整行的透镜不跟手：不要折射层，也不要指尖那团光（宽行正中一团光斑像污渍）。
+    // 整行的透镜不折射（宽行一折，整行的字都在晃），但指尖光照样有——所有能点的东西是同一套悬停动作。
+    // 光只跟着指针走、键盘走到这一行时不出（停在宽行正中的一团光像污渍）。
     // 不用 innerHTML：开了 Trusted Types 的页面上它会被拦
-    var parts = L.cfg.under ? ['sh', 'glass'] : ['sh', 'glass', 'ref', 'light'];
+    var parts = L.cfg.under ? ['sh', 'glass', 'light'] : ['sh', 'glass', 'ref', 'light'];
     for (var i = 0; i < parts.length; i++) {
       var c = doc.createElement('span');
       c.className = 'lg-lens-' + parts[i];
@@ -739,6 +748,7 @@
     L.cur = t;
     measureItems(L);
     retarget(L, ev);
+    if (ev && ev.clientX !== undefined) { lensPointer(L, ev); } else { pointerMark(L, false); }   // 指尖光从指针所在处亮起
     animate(L);
   }
 
@@ -803,7 +813,11 @@
     // 鼠标比手指收敛：纵向最多拉长 12%、横向 8%
     var sY = under ? 0 : Math.min(0.12, Math.abs(L.vy) / 3800), sX = under ? 0 : Math.min(0.08, Math.abs(L.vx) / 5200);
     var sx = (1 + sX) / (1 + 0.6 * sY), sy = (1 + sY) / (1 + 0.6 * sX);
-    sx *= 1 + 0.06 * p; sy *= 1 - 0.09 * p;              // 按下：横向鼓、纵向压，松手回弹像果冻
+    // 按下：横向鼓、纵向压，松手回弹像果冻。鼓多少按像素封顶（≤ 12px）：宽的项按比例鼓，一按就顶出面板。
+    // 整行不鼓、往里收一点（≤ 8px × 3px）——行占满整张表，往外鼓就被表格裁掉、圆角也没了
+    var bw = Math.max(1, L.w), bh = Math.max(1, L.h);
+    if (under) { sx *= 1 - Math.min(0.035, 8 / bw) * p; sy *= 1 - Math.min(0.06, 3 / bh) * p; }
+    else { sx *= 1 + Math.min(0.06, 12 / bw) * p; sy *= 1 - 0.09 * p; }
     var s0 = under ? 1 : 0.86 + 0.14 * a;                 // 出现：从小一圈长出来
     var par = !under && mode === 'full';
     var ox = par ? (L.px - 0.5) * 4 * a : 0, oy = par ? (L.py - 0.5) * 2 * a : 0;   // 跟手视差（「精简」不跟）
@@ -825,7 +839,8 @@
       var ix = Math.max(0, Math.min(L.x + L.w, it.x + it.w) - Math.max(L.x, it.x)) / (it.w || 1);
       var iy = Math.max(0, Math.min(L.y + L.h, it.y + it.h) - Math.max(L.y, it.y)) / (it.h || 1);
       var m = Math.min(1, ix * iy) * a, cur = it.el === L.cur;
-      var sc = 1 + L.cfg.mag * m - (cur ? 0.035 * Math.max(0, p) : 0);
+      // 按下那一项缩一点：同样按像素封顶（≤ 6px），宽项缩 3.5% 的话左边的字会跳好几个像素
+      var sc = 1 + L.cfg.mag * m - (cur ? Math.min(0.035, 6 / (it.w || 1)) * Math.max(0, p) : 0);
       var tx = cur ? (L.px - 0.5) * 3 * m : 0, ty = cur ? (L.py - 0.5) * 1.5 * m : 0;
       var key = sc.toFixed(4) + '|' + tx.toFixed(2) + '|' + ty.toFixed(2);
       if (key === it.key) { continue; }
@@ -849,8 +864,15 @@
     setGeom(L.F, w, h, r, { bezel: bez, depth: bez * K, blur: Math.max(0.5, h * 0.02), disp: 0.06, scatter: 0.05 });
   }
 
+  /** 透镜底下是不是指针（不是键盘）：整行的指尖光只在指针在的时候亮 */
+  function pointerMark(L, on) {
+    if (!L.el || on === L.el.hasAttribute('data-pointer')) { return; }
+    if (on) { L.el.setAttribute('data-pointer', ''); } else { L.el.removeAttribute('data-pointer'); }
+  }
+
   function lensPointer(L, ev) {
-    if (!L.el || !L.ta || L.cfg.under) { return; }
+    if (!L.el || !L.ta) { return; }
+    pointerMark(L, true);
     var sr = L.surf.getBoundingClientRect(), k = (sr.width / L.surf.offsetWidth) || 1;
     var cx = (ev.clientX - sr.left) / k - L.surf.clientLeft + L.surf.scrollLeft;
     var cy = (ev.clientY - sr.top) / k - L.surf.clientTop + L.surf.scrollTop;
@@ -927,7 +949,8 @@
       l: 0, r: 0, t: 0, b: 0, vl: 0, vr: 0, vt: 0, vb: 0, gl: 0, gr: 0, gt: 0, gb: 0,
       cl: SP.same, cr: SP.same, ct: SP.same, cb: SP.same, a: 0, va: 0, ta: 0, rad: null, w0: 0,
       // 分段开关才用（§5.5）：浮起 up、浮着飞 fly、整条被拉长 / 压扁 st（钉住 pin 那一端）、拖动 drag、浮起的透镜 lz
-      up: 0, vup: 0, tup: 0, fly: false, st: 0, vst: 0, pin: 'left', stKey: '', drag: null, lz: null, near: null, pad: 0, userAt: 0
+      up: 0, vup: 0, tup: 0, fly: false, st: 0, vst: 0, pin: 'left', stKey: '', drag: null, lz: null, near: null, pad: 0, userAt: 0,
+      pend: null   // 松手后替用户选的那一项，等页面接手（{ el, until }）
     };
     T.step = function (dt) { return thumbStep(T, dt); };
     T.paint = function () { thumbPaint(T); };
@@ -972,9 +995,13 @@
     for (i = 0; i < list.length; i++) { if (isOn(list[i]) && visible(list[i])) { cur = list[i]; break; } }
     var jump = T.a < 0.05 || calm() || (T.resized && surf.offsetWidth !== T.w0);
     T.resized = false; T.w0 = surf.offsetWidth;
-    if (T.drag && T.drag.moved) {                    // 拖到一半整片重画了：拖动作废，按页面现在的选中落定
+    if (T.drag) {                                    // 按着的时候滑块听手指的；整片重画了就作废，按页面现在的选中落定
       for (i = 0; i < T.drag.S.length; i++) { if (!surf.contains(T.drag.S[i].el)) { dragStop(T); break; } }
       if (T.drag) { return; }
+    }
+    // 松手后滑块已经先到了用户选的那一项；页面还没改过来（异步处理）的这一小会儿别把它拽回去，过了时限再按页面的来
+    if (T.pend) {
+      if (cur === T.pend.el || Date.now() > T.pend.until || !surf.contains(T.pend.el)) { T.pend = null; } else { return; }
     }
     if (!cur) {
       T.cur = null;
@@ -1005,30 +1032,31 @@
   }
 
   function thumbStep(T, dt) {
-    var held = !!(T.drag && T.drag.moved);            // 拖着的时候位置由手指定，不走弹簧
+    var held = !!(T.drag && T.drag.moved);            // 拖着：目标由手指定，滑块用一根很快的弹簧追（SP.drag）
     if (calm()) {
-      if (!held) { T.l = T.gl; T.r = T.gr; T.t = T.gt; T.b = T.gb; }
+      T.l = T.gl; T.r = T.gr; T.t = T.gt; T.b = T.gb;
       T.a = T.ta; T.vl = T.vr = T.vt = T.vb = T.va = 0;
       T.up = T.tup = T.vup = 0; T.st = T.vst = 0; T.fly = false;
       return false;
     }
-    if (!held) {
-      step(T, 'l', 'vl', T.gl, T.cl, dt); step(T, 'r', 'vr', T.gr, T.cr, dt);
-      step(T, 't', 'vt', T.gt, T.ct, dt); step(T, 'b', 'vb', T.gb, T.cb, dt);
-    }
+    step(T, 'l', 'vl', T.gl, T.cl, dt); step(T, 'r', 'vr', T.gr, T.cr, dt);
+    step(T, 't', 'vt', T.gt, T.ct, dt); step(T, 'b', 'vb', T.gb, T.cb, dt);
     step(T, 'a', 'va', T.ta, SP.fade, dt);
     var busy = Math.abs(T.a - T.ta) > 0.004 || Math.abs(T.va) > 0.03;
     if (T.cfg.kind === 'seg') {
       step(T, 'up', 'vup', T.tup, T.tup ? SP.up : SP.down, dt);
       if (!held) { step(T, 'st', 'vst', 0, SP.band, dt); }
-      // 浮着飞过去的：中心到了就落下（液态滑块的后沿还在追，落下那 0.26 秒里正好追上）
-      if (T.fly && !T.drag && Math.abs(T.l + T.r - T.gl - T.gr) < 8) { T.fly = false; T.tup = 0; segNear(T, null); }
+      // 浮着飞过去的：完全浮起来、而且中心到了才落下——相邻两项之间 0.2 秒就到，不等浮起的话透镜只闪一下。
+      // （液态滑块的后沿还在追，落下那 0.26 秒里正好追上）
+      if (T.fly && !T.drag && T.up > 0.9 && Math.abs(T.l + T.r - T.gl - T.gr) < 8) { T.fly = false; T.tup = 0; segNear(T, null); }
       var moving = T.fly || Math.abs(T.up - T.tup) > 0.005 || Math.abs(T.vup) > 0.05
         || (!held && (Math.abs(T.st) > 0.0002 || Math.abs(T.vst) > 0.003));
       if (!moving) { T.up = T.tup; T.vup = 0; if (!held) { T.st = T.vst = 0; } }
       busy = busy || moving;
     }
-    if (held) { return busy; }
+    if (held) {
+      return busy || Math.abs(T.l - T.gl) + Math.abs(T.r - T.gr) > 0.3 || Math.abs(T.vl) + Math.abs(T.vr) > 6;
+    }
     // 拉长有上限：跳得远时后沿不能拖成一整条，最多比落点那一项长出 44px（横向 56px），后沿被前沿拽着走
     var maxV = T.gb - T.gt + 44, maxH = T.gr - T.gl + 56;
     if (T.b - T.t > maxV) { if (T.ct === SP.lag) { T.t = T.b - maxV; } else if (T.cb === SP.lag) { T.b = T.t + maxV; } }
@@ -1050,7 +1078,7 @@
         // 有透镜：平胶囊一边放大到透镜的大小一边化开，同一时刻透镜的边从平胶囊的大小长出来——看上去是同一块玻璃浮起来
         L = liftRect(T);
         sx *= 1 + (L.w / w - 1) * up; sy *= 1 + (L.h / h - 1) * up;
-        op *= Math.max(0, 1 - up * 1.5);
+        op *= Math.max(0, 1 - up * 2.5);             // 化得快一点：飞的时候平胶囊被液态拉长，留着就是两层
       } else {
         sx *= 1 + 0.05 * up; sy *= 1 + 0.1 * up;     // 不能折射：滑块自己放大一点，就是「按住了」
       }
@@ -1088,8 +1116,8 @@
   /* ══ 5.5 分段开关：按住浮起、拖、橡皮筋、甩 ═════════════════════════════
    *
    * 照 iOS 26 的标签栏：
-   *   · 按住选中的那一项，滑块浮起成一块清玻璃透镜（比这一行高两成、比项左右各宽 7px），盖在字上面，
-   *     边上把底下的字放大、弯折；松手落回去。浮起带一点回弹，落下不回弹。
+   *   · 按住任意一项，滑块浮起成一块清玻璃透镜（比这一行高两成、比项左右各宽 7px），盖在字上面，
+   *     边上把底下的字放大、弯折；按的不是选中项的话，它浮着飞到手指下面。松手落回去。浮起带一点回弹，落下不回弹。
    *   · 按住拖：透镜跟着手指走，宽度在相邻两项之间过渡；离得最近的那一项先变成选中的样子。
    *     松手落到最近的一项；快速一甩（≥ 0.6 px/ms）往甩的方向再走一格（最多一格）。
    *   · 拖过两端：整条像橡皮筋被拉长，越拉越费劲，最多拉长轨道宽的 5%（≤ 18px）；松手弹回、略压扁一下再停。
@@ -1245,7 +1273,7 @@
     if (!D) { return; }
     if (T.surf.hasAttribute('data-lg-drag')) { T.surf.removeAttribute('data-lg-drag'); }
     try { if (T.surf.hasPointerCapture && T.surf.hasPointerCapture(D.id)) { T.surf.releasePointerCapture(D.id); } } catch (e) {}
-    if (!D.moved) { T.tup = 0; }
+    if (!D.moved && !T.fly) { T.tup = 0; }          // 只按了一下选中项：落回去。按的是别的项：浮着飞到了再落
     animate(T);
   }
 
@@ -1442,18 +1470,29 @@
     if (mode === 'off' || !ev.isPrimary || ev.button !== 0 || dragT) { return; }
     var f = segAt(ev.target);
     if (!f) { return; }
-    var T = f.T, it = f.item;
+    var T = f.T, it = f.item, i;
     T.userAt = Date.now();
-    // 按在别的项上是点击：页面换了选中，滑块再浮着飞过去
-    if (it !== T.cur || it.disabled || it.getAttribute('aria-disabled') === 'true') { return; }
-    var S = segStops(T);
+    if (!T.cur || it.disabled || it.getAttribute('aria-disabled') === 'true') { return; }
+    var S = segStops(T), at = null;
     if (!S) { return; }
+    for (i = 0; i < S.length; i++) { if (S[i].el === it) { at = S[i]; } }
+    if (!at) { return; }
     T.st = T.vst = 0; segStretch(T);                  // 上一次的回弹还没停：先收住再量
+    T.pend = null;
     var k = (T.surf.getBoundingClientRect().width / T.surf.offsetWidth) || 1;
-    T.drag = { id: ev.pointerId, x0: ev.clientX, c0: (T.gl + T.gr) / 2, c: (T.gl + T.gr) / 2, k: k, S: S,
+    T.drag = { id: ev.pointerId, x0: ev.clientX, c0: at.x + at.w / 2, c: at.x + at.w / 2, k: k, S: S,
       lastX: ev.clientX, t: ev.timeStamp, v: 0, moved: false };
     dragT = T;
-    if (liftOn()) { ensureLift(T); T.tup = 1; T.fly = false; animate(T); }   // 一按下就浮起来
+    T.fly = false;
+    if (it !== T.cur) {
+      // 按在别的项上（iOS 26：手指按在哪一项，玻璃就到哪一项底下）：滑块先飞到手指下面，选不选由松手时的点击交给页面
+      T.cl = at.x < T.gl ? SP.lead : SP.lag; T.cr = at.x + at.w > T.gr ? SP.lead : SP.lag;
+      T.gl = at.x; T.gr = at.x + at.w; T.cur = it;
+      T.fly = liftOn();
+      segNear(T, it);
+    }
+    if (liftOn()) { ensureLift(T); T.tup = 1; }     // 一按下就浮起来
+    animate(T);
   }, true);
 
   doc.addEventListener('pointermove', function (ev) {
@@ -1474,7 +1513,7 @@
     D.v += ((ev.clientX - D.lastX) / D.k / Math.max(1, ev.timeStamp - D.t) - D.v) * 0.35;
     D.lastX = ev.clientX; D.t = ev.timeStamp; D.c = D.c0 + dx;
     var g = dragThumb(D.S, D.c);
-    T.l = g.l; T.r = g.l + g.w; T.vl = T.vr = D.v * 1000;
+    T.gl = g.l; T.gr = g.l + g.w; T.cl = T.cr = SP.drag;
     if (!calm()) {
       var px = rubber(D.S, D.c, Math.min(18, T.w0 * 0.05));
       T.st = Math.abs(px) / (T.w0 || 1); T.vst = 0;
@@ -1490,7 +1529,10 @@
     if (!T || !T.drag || ev.pointerId !== T.drag.id) { return; }
     var D = T.drag;
     dragStop(T);
-    if (!D.moved) { return; }                        // 只是按了一下：落回去，点击照常交给页面
+    if (!D.moved) {                                  // 只是按了一下：点击照常交给页面（按的是别的项，滑块已经先到了）
+      if (T.cur && !isOn(T.cur)) { T.pend = { el: T.cur, until: Date.now() + 1200 }; setTimeout(scheduleSync, 1250); }
+      return;
+    }
     // 指针被系统收走（pointercancel）时按此刻的位置落定，不算甩
     var v = ev.type === 'pointerup' && ev.timeStamp - D.t < 90 ? D.v : 0;
     var to = snapStop(D.S, D.c, v);
@@ -1506,9 +1548,13 @@
     eatClick = T.surf;
     setTimeout(function () {
       eatClick = null;
-      if (T.surf.contains(to.el) && !isOn(to.el)) { to.el.click(); }
+      if (T.surf.contains(to.el) && !isOn(to.el)) {
+        T.pend = { el: to.el, until: Date.now() + 1200 };
+        to.el.click();
+        setTimeout(scheduleSync, 1250);              // 页面最后也没接受这次选中：滑块回到真正选中的那一项
+      }
       if (!T.fly) { segNear(T, null); }
-      scheduleSync();                                // 页面没接受这次选中：滑块回到真正选中的那一项
+      scheduleSync();
     }, 0);
     animate(T);
   }
