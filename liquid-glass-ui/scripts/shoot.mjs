@@ -3,7 +3,9 @@
  * 用真浏览器把演示页（或你自己的页面）拍下来，并验三档是不是真的分得开。
  *
  *   node scripts/shoot.mjs                     拍演示页的整套截图到 ./shots/，并做三档校验与一致性校验
- *                                              （每个能点的元素悬停都有反馈；所有玻璃同一种材质、并排的胶囊不一深一浅）
+ *                                              （每个能点的元素悬停都有反馈；所有玻璃同一种材质、并排的胶囊不一深一浅）、
+ *                                              折射校验（玻璃正中和不折射时逐像素一样、边上确实在弯）、
+ *                                              分段开关校验（按住浮起、拖、甩、橡皮筋、点、精简档）
  *   node scripts/shoot.mjs --out design        换输出目录
  *   node scripts/shoot.mjs --check             只做校验，不留截图
  *   node scripts/shoot.mjs --url http://localhost:3000/  拍你自己的页面：浅 / 深 × 三档 6 张全屏，再做同样的三档校验
@@ -204,6 +206,146 @@ async function consistencyCheck() {
   await close(o, 'consistency glass');
 }
 
+/** 两张同样大小的截图：中间（四边各缩进 ix / iy 像素）和外圈各有多少像素不同 */
+async function regionDiff(a, b, ix, iy) {
+  const { ctx, page } = await open();
+  const r = await page.evaluate(async ([sa, sb, ix, iy]) => {
+    const load = s => new Promise(ok => { const i = new Image(); i.onload = () => ok(i); i.src = s; });
+    const [ia, ib] = await Promise.all([load(sa), load(sb)]);
+    const w = ia.width, h = ia.height;
+    const px = img => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.drawImage(img, 0, 0); return g.getImageData(0, 0, w, h).data; };
+    const A = px(ia), B = px(ib);
+    let cn = 0, ct = 0, cmax = 0, en = 0, et = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4, d = Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
+        if (x >= ix && x < w - ix && y >= iy && y < h - iy) { ct++; if (d > 3) { cn++; } cmax = Math.max(cmax, d); }
+        else { et++; if (d > 24) { en++; } }
+      }
+    }
+    return { center: cn / ct, centerMax: cmax, edge: en / et };
+  }, ['data:image/png;base64,' + a.toString('base64'), 'data:image/png;base64,' + b.toString('base64'), ix, iy]);
+  await ctx.close();
+  return r;
+}
+
+/**
+ * 折射校验（演示页的那颗玻璃）：同一块玻璃、同一条滤镜链，只把折射那一步换成什么都不做，前后各拍一张。
+ *   · 正中（离边超过边宽、离两端超过圆角）必须逐像素一样——中间一个像素都不重采样；
+ *   · 外圈必须有相当一部分像素变了——边上确实在放大、弯折。
+ */
+async function refractCheck() {
+  const o = await open({ mode: 'full', dpr: 2 });
+  const p = o.page;
+  const g = await p.evaluate(() => {
+    const d = document.getElementById('drop');
+    d.style.transform = 'translate(150px,34px)';
+    return { on: d.hasAttribute('data-lg-refract-on'), bezel: parseFloat(d.getAttribute('data-lg-refract')) || 16,
+      radius: parseFloat(getComputedStyle(d).borderTopLeftRadius) || 0 };
+  });
+  if (!g.on) { failures.push('折射校验：演示页的玻璃没开折射（完整档、Chromium 下应当开）'); await close(o, 'refract'); return; }
+  await p.locator('#lab').scrollIntoViewIfNeeded();
+  await p.waitForTimeout(500);
+  const clip = await p.locator('#drop').boundingBox();
+  const on = await p.screenshot({ clip });
+  await p.evaluate(() => document.getElementById('drop').style.setProperty('--lg-ref', 'blur(0px)'));
+  await p.waitForTimeout(300);
+  const off = await p.screenshot({ clip });
+  const r = await regionDiff(on, off, Math.ceil((g.radius + 3) * 2), Math.ceil((g.bezel + 3) * 2));
+  console.log(`  折射：正中 ${(r.center * 100).toFixed(3)}% 的像素不同（最大差 ${r.centerMax}），外圈 ${(r.edge * 100).toFixed(1)}% 在弯`);
+  if (r.center > 0.001 || r.centerMax > 6) { failures.push(`折射校验：玻璃正中被重采样了（${(r.center * 100).toFixed(3)}% 的像素和不折射时不同）`); }
+  if (r.edge < 0.03) { failures.push(`折射校验：外圈只有 ${(r.edge * 100).toFixed(1)}% 的像素变了，看不出折射`); }
+  await close(o, 'refract');
+}
+
+/**
+ * 分段开关校验（演示页「时间范围」那一组）：按住浮起、只按不动不换选中、拖着换选中（浏览器补的那一下 click 不能把选中点回去）、
+ * 甩、拖过两端的橡皮筋、点别的项浮着飞过去、精简档照样能拖但不浮起、选中变粗不挤开旁边的项。
+ */
+async function segCheck() {
+  const SEG = '.lg-seg[aria-label="时间范围"]';
+  const fail = m => failures.push('分段开关：' + m);
+  const prep = async (mode = 'full') => {
+    const o = await open({ mode });
+    await o.page.locator(SEG).scrollIntoViewIfNeeded();
+    await o.page.waitForTimeout(200);
+    return o;
+  };
+  const sel = p => p.evaluate(s => [...document.querySelectorAll(s + ' > button')].findIndex(x => x.getAttribute('aria-pressed') === 'true'), SEG);
+  const at = p => p.evaluate(s => [...document.querySelectorAll(s + ' > button')].map(x => { const r = x.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }), SEG);
+  const st = p => p.evaluate(s => {
+    const seg = document.querySelector(s), T = seg.__lgT, lift = seg.querySelector('.lg-lift');
+    return { up: T.up, fly: T.fly, st: T.st, transform: seg.style.transform, lifted: !!lift && lift.hasAttribute('data-up'),
+      ref: lift ? getComputedStyle(lift.querySelector('.lg-lift-ref')).backdropFilter : '', plate: +seg.querySelector('.lg-thumb').style.opacity,
+      near: [...seg.children].findIndex(x => x.hasAttribute('data-lg-near')) };
+  }, SEG);
+
+  let o = await prep(), p = o.page, B = await at(p);
+  const before = await at(p);
+  await p.click(SEG + ' > button:nth-child(3)'); await p.waitForTimeout(800);
+  const after = await at(p);
+  if (before.some((b, i) => Math.abs(b.x - after[i].x) > 0.6)) { fail('换选中时旁边的项被挤动了（粗体没有预留宽度）'); }
+  await p.click(SEG + ' > button:nth-child(1)'); await p.waitForTimeout(800);
+  await p.mouse.move(B[0].x, B[0].y); await p.mouse.down(); await p.waitForTimeout(450);
+  let s = await st(p);
+  if (!s.lifted || s.up < 0.9 || !/url/.test(s.ref) || s.plate > 0.05) { fail('按住选中项，滑块应当浮起成一块正在折射的透镜：' + JSON.stringify(s)); }
+  await p.mouse.up(); await p.waitForTimeout(500);
+  s = await st(p);
+  if (s.lifted || await sel(p) !== 0) { fail('只按一下不动：应当落回去、不换选中'); }
+  await p.mouse.move(B[0].x, B[0].y); await p.mouse.down();
+  await p.mouse.move(B[2].x, B[2].y, { steps: 20 }); await p.waitForTimeout(200);
+  if ((await st(p)).near !== 2) { fail('拖动中离滑块最近的那一项应当标 data-lg-near'); }
+  await p.mouse.up(); await p.waitForTimeout(900);
+  s = await st(p);
+  if (await sel(p) !== 2) { fail(`拖到第三项松手，应当选中第三项，实际是第 ${await sel(p) + 1} 项`); }
+  if (s.lifted || s.fly || s.near !== -1) { fail('拖完落定后透镜应当落下、标记清掉：' + JSON.stringify(s)); }
+  await close(o, 'seg drag');
+
+  // 甩：Playwright 的鼠标在无头浏览器里每步间隔几十毫秒，甩不起来；在页面里直接发指针事件，每个之间忙等 3ms
+  // （同一个任务里发完，不受机器忙闲影响）：6px / 3ms = 2px/ms，总共只挪 18px——离第一项还最近，能走到第二项全靠「甩」
+  o = await prep(); p = o.page;
+  await p.evaluate(s => {
+    const b = document.querySelector(s + ' > button'), r = b.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2;
+    const fire = (type, dx) => b.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 7,
+      isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x + dx, clientY: y, pointerType: 'mouse' }));
+    const wait = ms => { const t = performance.now(); while (performance.now() - t < ms) { /* 忙等 */ } };
+    fire('pointerdown', 0);
+    for (const dx of [6, 12, 18]) { wait(3); fire('pointermove', dx); }
+    wait(3); fire('pointerup', 18);
+  }, SEG);
+  await p.waitForTimeout(60);
+  s = await st(p);
+  if (await sel(p) !== 1) { fail('往右轻甩 18px（离第一项还最近）应当走到下一项'); }
+  if (!(Math.abs(s.st) > 0.002 && /scale/.test(s.transform))) { fail('甩出去时整条应当朝甩的方向形变：' + JSON.stringify(s)); }
+  await p.waitForTimeout(1000);
+  if ((await st(p)).transform) { fail('甩完应当回弹到原样'); }
+  await close(o, 'seg flick');
+
+  o = await prep(); p = o.page; B = await at(p);
+  await p.mouse.move(B[0].x, B[0].y); await p.mouse.down();
+  await p.mouse.move(B[0].x - 400, B[0].y, { steps: 16 }); await p.waitForTimeout(150);
+  s = await st(p);
+  if (!(s.st > 0.01 && s.st <= 0.05 + 1e-6 && /scale/.test(s.transform))) { fail('拖过左端应当整条被拉长、且有上限（≤ 5%）：' + JSON.stringify(s)); }
+  await p.mouse.up(); await p.waitForTimeout(1000);
+  if ((await st(p)).transform || await sel(p) !== 0) { fail('拖过两端松手：应当弹回原样、选中不变'); }
+  await p.mouse.move(B[3].x, B[3].y); await p.mouse.down(); await p.mouse.up(); await p.waitForTimeout(120);
+  if (!(await st(p)).fly) { fail('点别的项：滑块应当浮着飞过去'); }
+  await p.waitForTimeout(1200);
+  s = await st(p);
+  if (s.fly || s.lifted || await sel(p) !== 3) { fail('点别的项：到了应当落下、选中那一项'); }
+  await close(o, 'seg band');
+
+  o = await prep('lite'); p = o.page; B = await at(p);
+  await p.mouse.move(B[0].x, B[0].y); await p.mouse.down();
+  await p.mouse.move(B[1].x, B[1].y, { steps: 12 }); await p.waitForTimeout(200);
+  s = await st(p);
+  if (s.lifted || s.transform) { fail('精简档：拖的时候不该浮起、不该拉长'); }
+  await p.mouse.up(); await p.waitForTimeout(300);
+  if (await sel(p) !== 1) { fail('精简档：应当照样能拖着换选中'); }
+  await close(o, 'seg lite');
+  console.log('  分段开关：按住浮起、拖、甩、橡皮筋、点、精简档都过了一遍');
+}
+
 if (!checkOnly) { await mkdir(outDir, { recursive: true }); }
 
 /**
@@ -295,6 +437,10 @@ if (userUrl) {
   // 再核对所有玻璃是同一种材质：宿主背景透明、玻璃层的底色与模糊一样、并排的胶囊像素上看不出差别。
   await consistencyCheck();
 
+  // ── 1.6 折射与分段开关 ──
+  await refractCheck();
+  await segCheck();
+
   if (!checkOnly) {
     // ── 2 图集 ──
     const scenes = [
@@ -325,6 +471,15 @@ if (userUrl) {
         await p.evaluate(() => { const d = document.getElementById('drop'); d.style.transform = 'translate(150px,34px)'; });
         await p.waitForTimeout(500);
       }, null, async p => { const b = await p.locator('#lab').boundingBox(); return { x: b.x, y: b.y, width: b.width, height: b.height }; }],
+      ...['light', 'dark'].map(theme => [theme === 'light' ? 'lift@2x.png' : 'lift-dark@2x.png', { dpr: 2, theme }, async p => {
+        // 按住「今天」往右拖到「本周」和「本月」之间：透镜浮起来，边上把底下的字放大、弯折
+        const seg = p.locator('.lg-seg[aria-label="时间范围"]');
+        await seg.scrollIntoViewIfNeeded();
+        const b = await p.locator('.lg-seg[aria-label="时间范围"] > button').evaluateAll(xs => xs.map(x => { const r = x.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }));
+        await p.mouse.move(b[0].x, b[0].y); await p.mouse.down();
+        await p.mouse.move((b[1].x + b[2].x) / 2 - 6, b[0].y, { steps: 14 });
+        await p.waitForTimeout(500);
+      }, null, async p => { const b = await p.locator('.lg-seg[aria-label="时间范围"]').boundingBox(); return { x: b.x - 18, y: b.y - 18, width: b.width + 36, height: b.height + 36 }; }]),
       ['login.png', { query: '?view=login' }, async p => { await p.waitForTimeout(300); }],
       ['login-dark.png', { theme: 'dark', query: '?view=login' }, async p => { await p.waitForTimeout(300); }]
     ];

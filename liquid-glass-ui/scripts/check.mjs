@@ -12,6 +12,7 @@
  *   · 「深色（显式）」与「深色（跟随系统）」两块令牌逐字一致；深色里的令牌浅色里都有
  *   · 脚本插入的元素、预设里的组件类，样式表里都有；样式表认的状态属性，脚本都会写
  *   · 页面里用到的 lg-* 类都在样式表里（拼错一个字母就是一块不起作用的样式）
+ *   · 查本套件自己时：脚本里折射的位移曲线常数（K）与 scripts/displacement_map.py 一致
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -128,7 +129,7 @@ const presetClasses = [...js.matchAll(/sel:\s*'([^']+)'/g)].flatMap(m => [...m[1
 check('脚本插入的元素、预设里的组件类，样式表里都有',
   [...new Set([...jsClasses, ...presetClasses])].filter(c => c !== 'lg-defs' && !classesInCss.has(c)).map(c => `.${c} 在样式表里没有`));
 
-const stateAttrs = [...new Set([...plain.matchAll(/\[(data-(?:lg-[\w-]+|settled|onsel|danger|side))/g)].map(m => m[1]))];
+const stateAttrs = [...new Set([...plain.matchAll(/\[(data-(?:lg-[\w-]+|settled|onsel|danger|side|up))/g)].map(m => m[1]))];
 const writtenByPage = ['data-lg-mode-switch', 'data-lg-tip', 'data-lg-lens', 'data-lg-refract', 'data-lg-slider', 'data-lg-hdr'];
 check('样式表认的状态属性，脚本都会写', stateAttrs
   .filter(a => !js.includes(`'${a}'`) && !writtenByPage.includes(a) && !(a === 'data-lg-lens' && js.includes("'data-lg-lens'")))
@@ -141,6 +142,15 @@ for (const p of htmlPaths) {
   const pageCss = new Set([...html.matchAll(/\.(lg-[\w-]+)/g)].map(m => m[1]));
   check(`页面里用到的 lg-* 类都在样式表里（${p.split(/[\\/]/).slice(-2).join('/')}）`,
     [...new Set([...inPage, ...inPageJs])].filter(c => !classesInCss.has(c) && !pageCss.has(c) && c !== 'lg-toast--').map(c => `.${c}`));
+}
+
+// 位移曲线 D(s) = K·b·(1 − s/b)² 的常数：脚本与离线生成器各写一份，改了一边忘了另一边，静态滤镜就和运行时对不上
+if (!argv.length) {
+  const py = readFileSync(resolve(here, 'displacement_map.py'), 'utf8');
+  const kj = /\bvar K = ([\d.]+)/.exec(js), kp = /^K = ([\d.]+)/m.exec(py);
+  check('折射的位移曲线常数与 displacement_map.py 一致',
+    !kj || !kp ? ['找不到 K（liquid-glass.js 里的 var K = …，或 displacement_map.py 里的 K = …）']
+      : kj[1] !== kp[1] ? [`liquid-glass.js 是 ${kj[1]}，displacement_map.py 是 ${kp[1]}`] : []);
 }
 
 console.log(`\n${pass} 项通过，${fails.length} 项失败`);

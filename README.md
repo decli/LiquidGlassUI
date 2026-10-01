@@ -9,9 +9,14 @@
 |---|---|
 | ![深色](design/dark.png) | ![三档](design/modes.png) |
 
+| 按住分段开关拖：浮起的透镜把边上的字放大、弯折 | 折射：边上放大 + 模糊 + 散射，正中原样 |
+|---|---|
+| ![浮起的透镜](design/lift@2x.png) | ![折射](design/refraction@2x.png) |
+
 ## 有什么
 
-- **会折射的玻璃**：`backdrop-filter` 里挂 SVG 位移贴图，贴图按每块玻璃的实际尺寸现算（圆角矩形 + 凸斜面 + 斯涅尔定律），边缘像一块有厚度的凸透镜把背后的内容往里弯。Chrome / Edge 上有，其他浏览器自动退成模糊。
+- **会折射的玻璃**：照 iOS 26 的玻璃边——边上那一圈把背后的内容**放大**、轻微**模糊**、泛一层很淡的乳白（**散射**）和一点彩边（**色散**），正中一个像素都不动。`backdrop-filter` 里挂一条 SVG 滤镜：位移曲线 `0.45·b·(1 − s/b)²` 往里取样、处处不折叠，贴图切成九宫格，尺寸变了只挪不重画。Chrome / Edge 上有，其他浏览器自动退成模糊。
+- **按住浮起的分段开关**：像 iOS 26 的标签栏，按住选中项，白滑块浮起成一块盖在字上面、会折射的清玻璃透镜；能拖，拖过两端像橡皮筋，甩一下整条形变再回弹；点别的项时浮着飞过去。
 - **流动的透镜**：鼠标经过、键盘聚焦时，一颗清玻璃按弹簧物理流到那一项底下，经过的项微微放大、跟手，按下像果冻。
 - **液态滑块**：选中项底下那一块前沿先到、后沿后到，中途被拉长、落定回弹。
 - **统一的按钮反馈**：悬停浮起 1px + 投影加深 + 跟着指针走的指尖光，按下缩一点。
@@ -20,7 +25,8 @@
   跟随系统的「减少动态效果」「减少透明度」「增强对比度」。
 - **HDR 高光**：HDR 屏上玻璃上沿一道比页面白更亮的光（16 位 PNG + cICP）。
 - **浅色 / 深色 / 跟随系统**，玻璃提示、浮动提示、命令面板、弹出菜单、表格、表单一整套组件。
-- **完整的方法**：设计规范、技术原理、25 个踩坑、每轮评审的设计决策、静态检查与截图校验脚本。
+- **完整的方法**：设计规范、技术原理、33 个踩坑、每轮评审的设计决策、静态检查与截图校验脚本。
+  第二版（1.1.0）对照 [ZeppBridge](https://github.com/lingcang728/ZeppBridge/tree/v3) 照 iOS 26 逐帧重做的玻璃改了折射模型、加上了按住浮起，经过见 `references/design-decisions.md` 第八轮。
 
 ## 在网页项目里用
 
@@ -86,7 +92,7 @@ liquid-glass-ui/                 ← skill 本体（整个文件夹拷走即可�
 ├── SKILL.md                     skill 入口：什么时候用、工作流程、不能破的规则
 ├── assets/
 │   ├── liquid-glass.css         令牌 + 玻璃材质 + 组件 + 分档
-│   ├── liquid-glass.js          交互层（ES5）：折射、透镜、液态滑块、指尖光、玻璃提示、HDR、三档
+│   ├── liquid-glass.js          交互层（ES5）：折射、透镜、液态滑块、分段开关的浮起与拖动、指尖光、玻璃提示、HDR、三档
 │   └── demo/index.html          完整演示页
 ├── references/
 │   ├── design-spec.md           设计规范（定稿）
@@ -96,7 +102,7 @@ liquid-glass-ui/                 ← skill 本体（整个文件夹拷走即可�
 │   └── design-decisions.md      设计决策记录
 └── scripts/
     ├── check.mjs                静态检查（只要 Node）
-    ├── shoot.mjs                真浏览器截图 + 三档校验（要 Playwright）
+    ├── shoot.mjs                真浏览器截图 + 三档 / 折射 / 分段开关校验（要 Playwright）
     ├── displacement_map.py      位移贴图 / 静态 SVG 滤镜生成器
     └── hdr_png.py               HDR 高光贴片生成器
 design/                          定稿截图（由 scripts/shoot.mjs 拍的）
@@ -117,8 +123,9 @@ tools/package_skill.py           把 liquid-glass-ui/ 打成 .skill（与官方 
 
 ```bash
 node liquid-glass-ui/scripts/check.mjs         # ES5、不改 class、令牌一致、类名没拼错
-node liquid-glass-ui/scripts/shoot.mjs         # 拍演示页整套截图，并验：三档分得开、每个能点的元素悬停都有反馈、所有玻璃同一种材质（需要 Playwright）
-python3 liquid-glass-ui/scripts/displacement_map.py --selftest
+node liquid-glass-ui/scripts/shoot.mjs         # 拍演示页整套截图，并验：三档分得开、每个能点的元素悬停都有反馈、所有玻璃同一种材质、
+                                               # 玻璃正中逐像素不动而外圈在弯、分段开关按住浮起 / 拖 / 甩 / 橡皮筋都对（需要 Playwright）
+python3 liquid-glass-ui/scripts/displacement_map.py --selftest   # 位移曲线不折叠、九宫格拼回去和整张一样
 python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liquid-glass.js
 ```
 
@@ -147,8 +154,11 @@ python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liqui
 ## English
 
 **Liquid Glass UI** is a dependency-free kit (one CSS file + one ES5 script) that brings Apple's Liquid Glass material to web
-apps: real edge refraction via SVG displacement maps inside `backdrop-filter` (Chromium), fluid spring-driven hover lenses,
-liquid selection sliders, pointer-following glow, glass tooltips, HDR highlights, an iPadOS-style grouped sidebar, and a
+apps: iOS 26-style edge refraction inside `backdrop-filter` (Chromium) — the rim magnifies, softly blurs, scatters and
+disperses what is behind it while the centre stays pixel-exact (a non-folding inward displacement curve on a nine-slice map) —
+fluid spring-driven hover lenses, liquid selection sliders, a tab-bar-style segmented control whose thumb lifts into a
+refracting lens you can drag (rubber-band ends, flick deformation), pointer-following glow, glass tooltips, HDR highlights,
+an iPadOS-style grouped sidebar, and a
 Full / Lite / Off switch with automatic fallback on software-rendered GPUs. It is also a Claude skill: copy
 `liquid-glass-ui/` into `~/.claude/skills/` and ask Claude to restyle a UI in Liquid Glass. Docs are in Chinese;
 the script's built-in messages switch to English when `<html lang>` is not Chinese. MIT licensed.

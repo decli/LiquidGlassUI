@@ -1,17 +1,18 @@
 /*!
- * Liquid Glass UI —— 交互层 v1.0.0
+ * Liquid Glass UI —— 交互层 v1.1.0
  *
  * 只管「看着像玻璃、摸着像水」，不碰业务：不发请求、不改表单、不改页面元素的 class。
  * 删掉这个 <script>，页面照样能用——liquid-glass.css 里有不带脚本的退路。
  * 原理、参数怎么来的、踩过的坑，见 references/ 下的文档。
  *
- * 做的七件事：
+ * 做的八件事：
  *   1 分档：用户选的三档（完整 / 精简 / 关闭，没选过是「自动」）写在 <html data-lg-mode>，
  *     材质档写在 <html data-lg-tier>：l0 实色 / l1 模糊 / l2 模糊 + 折射 / l3 再加 HDR 高光。
- *   2 折射：按每块玻璃的实际尺寸现算一张位移贴图（圆角矩形 + 凸斜面 + 斯涅尔定律），
- *     挂成 SVG 滤镜交给 backdrop-filter。只有 Chromium 认 backdrop-filter 里的 url()。
+ *   2 折射：照 iOS 26 的玻璃边——边上放大、模糊、散射（加一点色散），正中一个像素都不动。
+ *     位移贴图切成九宫格，尺寸变了只挪不重画；挂成 SVG 滤镜交给 backdrop-filter。只有 Chromium 认 backdrop-filter 里的 url()。
  *   3 透镜：鼠标经过 / 键盘聚焦时，一颗清玻璃按弹簧物理流到那一项下面；经过的项微微放大、跟手。
  *   4 液态滑块：选中项底下那块，前沿先到、后沿后到，中途被拉长、落定回弹。
+ *     分段开关的滑块还能按住：浮起成一块盖在字上面、会折射的透镜，能拖、拖过两端像橡皮筋、甩一下会形变（§5.5）。
  *   5 指尖光：玻璃按钮上跟着指针走的一小团光（只写 CSS 变量 --mx / --my）。
  *   6 玻璃提示：把 title 小黄框换成玻璃气泡，离开时原样放回（读屏照样读得到）。
  *   7 HDR 高光：HDR 屏上玻璃上沿一道比页面白更亮的光。
@@ -104,6 +105,9 @@
    *   mag   被透镜盖住的项放大多少：窄项 3–5%；宽列表项 ≤ 1.5%（放大以中心为原点，500px 宽放大 2% 左边的字就跳 5px）；整行 0
    *   rad   透镜圆角；不写就照那一项自己的圆角
    *   under 表格一类整行：只垫一块亮板，不折射、不跟手、没有光斑
+   * 折射（refract）：
+   *   bezel 玻璃边宽（px）；depth 最外缘位移（px，缺省 0.45 × bezel）；disp 色散（缺省 0.08）；scatter 边上乳白的浓度（缺省 0.05）
+   * 滑块（slider）kind 为 seg 的（分段开关）还能按住拖：按住选中项它浮起成一块会折射的透镜，见 §5.5。
    */
   var PRE = CFG.presets === false ? {} : {
     lens: [
@@ -120,9 +124,9 @@
     ],
     // 只给「背后真有内容」的玻璃：弹出层盖在正文上、保存条底下滚着表单。背后是纯色页面底的玻璃折了也看不出来，白花显卡
     refract: [
-      { sel: '.lg-menu', bezel: 18, height: 16, thick: 8 },
-      { sel: '.lg-panel', bezel: 24, height: 22, thick: 11 },
-      { sel: '.lg-toolbar--sticky', bezel: 14, height: 12, thick: 6 }
+      { sel: '.lg-menu', bezel: 18, depth: 8 },
+      { sel: '.lg-panel', bezel: 24, depth: 11 },
+      { sel: '.lg-toolbar--sticky', bezel: 14, depth: 6 }
     ],
     hdr: [
       { sel: '.lg-sidebar', spots: 'top bottom' },
@@ -254,69 +258,96 @@
 
   /* ══ 2 折射：位移贴图 + SVG 滤镜 ═════════════════════════════════════════
    *
-   * 几何：圆角矩形的有符号距离（Inigo Quilez 的公式），离边缘 bezel 像素以内是一圈凸起的玻璃边，
-   * 中间是平的。边的剖面用凸超椭圆 h(u) = (1-(1-u)^4)^¼（u=0 最外沿，u=1 进入平面）。
-   * 光学：视线垂直向下，在斜面上按斯涅尔定律折射（空气→玻璃 n=1.5），穿过恒定厚度 thick 的玻璃，
-   * 横向偏移 = thick·tan(θ−θt)。边缘偏得最多、往里单调减小，指向玻璃内部（凸透镜把光往中间收）。
-   * 编码：R = x 偏移、G = y 偏移，128 = 不动；feDisplacementMap 的 scale = 2 × 最大偏移。
+   * 照 iOS 26 的玻璃边：**放大 + 模糊 + 散射**（外加一点色散），正中一个像素都不重采样。
+   *
+   * 几何：圆角矩形，离边 b（边宽）以内是斜面。斜面**往里取样、越靠边位移越大**：
+   *   D(s) = K·b·(1 − s/b)²，K = 0.45，s 是离边的距离
+   * 最外缘 D′ = −0.9：边上那一圈被拉开约十倍（放大），往里平滑落回原样；取样位置 s + D(s) 处处单调
+   * （处处 D′ > −1），不折叠——同一段内容不会被画两遍，边上也不会出现镜像。
+   * （上一版按斯涅尔定律 + 凸超椭圆算：位移全挤在最外两三个像素里，而且在那儿折叠了，边上的字被画两遍。）
+   *
+   * 位移图四个通道：R / G = 往哪边取样（128 = 不动），B = 位移大小 m = (1 − s/b)²（0 中间、1 最外缘），A = 形状。
+   * 滤镜拿 m 当权重：红绿蓝三路按略不同的强度位移（色散）；越靠边叠越多的模糊（m^1.6）和一层很淡的乳白（散射）；
+   * m 太小的地方直接用原图——中间一个像素都不重采样。
+   *
+   * 位移图按九宫格切：四个角（c × c，c = max(圆角, 边宽)）、四条边（沿边方向处处一样，存一条 2 像素宽的图拉伸），
+   * 中间不放（透明 = 用原图）。尺寸变了只改这八块的 x / y / width / height，不重画贴图——
+   * 拖窗口、透镜跟着项宽变的时候，折射都不用撤。
    */
-  var maps = {}, mapCount = 0;
+  var K = 0.45, TILE_PX = 2;
+  var tileSets = {}, tileCount = 0;
+  var PARTS = ['t', 'b', 'l', 'r', 'tl', 'tr', 'bl', 'br'];
+  // 每块是不是在右边 / 下边（是的话坐标镜像过去按左上角算，法向再翻回来）
+  var SIDE = { t: [0, 0], b: [0, 1], l: [0, 0], r: [1, 0], tl: [0, 0], tr: [1, 0], bl: [0, 1], br: [1, 1] };
 
-  function sdf(px, py, hw, hh, r, out) {
-    var qx = Math.abs(px) - (hw - r), qy = Math.abs(py) - (hh - r);
-    var ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0;
-    var d = Math.sqrt(ox * ox + oy * oy) + Math.min(Math.max(qx, qy), 0) - r, nx, ny;
-    if (qx > 0 && qy > 0) { var l = Math.sqrt(qx * qx + qy * qy) || 1; nx = qx / l; ny = qy / l; }
-    else if (qx > qy) { nx = 1; ny = 0; } else { nx = 0; ny = 1; }
-    out[0] = d; out[1] = px < 0 ? -nx : nx; out[2] = py < 0 ? -ny : ny;
+  /**
+   * 左上角那一块里的一点 (x, y)（从元素左上角量）：离边多远、朝外的单位法向。
+   * 圆角那一格里离的是圆弧（在弧外是负数），其余离的是更近的那条直边。
+   */
+  function corner(x, y, r, out) {
+    var dx = x - r, dy = y - r;
+    if (dx < 0 && dy < 0) {
+      var l = Math.sqrt(dx * dx + dy * dy);
+      out[0] = r - l; out[1] = l > 1e-6 ? dx / l : 0; out[2] = l > 1e-6 ? dy / l : 0;
+    } else if (x < y) { out[0] = x; out[1] = -1; out[2] = 0; }
+    else { out[0] = y; out[1] = 0; out[2] = -1; }
+  }
+  /** 一个像素：离边 s、朝外的法向 (nx, ny)、边宽 b、覆盖率 cov。往里取样 = 沿法向的反方向 */
+  function texel(px, i, s, nx, ny, b, cov) {
+    if (s >= b) { px[i] = 128; px[i + 1] = 128; px[i + 2] = 0; }
+    else {
+      var m = 1 - Math.max(s, 0) / b;
+      m *= m;
+      px[i] = Math.round(127.5 - nx * m * 127.5);
+      px[i + 1] = Math.round(127.5 - ny * m * 127.5);
+      px[i + 2] = Math.round(m * 255);
+    }
+    px[i + 3] = Math.round(cov * 255);
   }
 
-  function makeMap(w, h, r, bezel, height, thick) {
-    w = Math.max(4, Math.round(w)); h = Math.max(4, Math.round(h));
-    var hw = w / 2, hh = h / 2;
-    r = clamp(r, 0, Math.min(hw, hh));
-    bezel = clamp(bezel, 2, Math.min(hw, hh));
-    var key = w + 'x' + h + 'x' + r.toFixed(1) + 'x' + bezel.toFixed(1) + 'x' + height + 'x' + thick;
-    if (maps[key]) { return maps[key]; }
-    if (mapCount > 48) { maps = {}; mapCount = 0; }
-    var eta = 1 / 1.5, n = w * h, dx = new Float32Array(n), dy = new Float32Array(n), maxd = 1e-6;
-    var s = [0, 0, 0], x, y, sx, sy;
-    for (y = 0; y < h; y++) {
-      for (x = 0; x < w; x++) {
-        sdf(x + 0.5 - hw, y + 0.5 - hh, hw, hh, r, s);
-        if (-s[0] >= bezel + 1 || s[0] > 1) { continue; }          // 平面或外面：不动
-        var ax = 0, ay = 0;
-        for (sy = 0; sy < 2; sy++) {                                 // 2×2 超采样，只在斜面上算
-          for (sx = 0; sx < 2; sx++) {
-            sdf(x + (sx + 0.5) / 2 - hw, y + (sy + 0.5) / 2 - hh, hw, hh, r, s);
-            var t = -s[0];
-            if (t <= 0 || t >= bezel) { continue; }
-            var u = Math.max(t / bezel, 1e-4), a = 1 - Math.pow(1 - u, 4);
-            var dh = Math.pow(1 - u, 3) * Math.pow(a, -0.75);        // h'(u)
-            var theta = Math.atan(height / bezel * dh);                // 法线偏离竖直的角度
-            var tt = Math.asin(eta * Math.sin(theta));                  // 折射角
-            var travel = thick * Math.tan(theta - tt);
-            ax -= s[1] * travel; ay -= s[2] * travel;
+  /** 一套九宫格贴图（八张 data URL），按「角的边长 × 圆角 × 边宽」缓存。贴图按 2 倍密度画，高分屏上也细 */
+  function tileSet(c, r, b) {
+    var key = c.toFixed(2) + '|' + r.toFixed(2) + '|' + b.toFixed(2);
+    if (tileSets[key]) { return tileSets[key]; }
+    if (tileCount > 24) { tileSets = {}; tileCount = 0; }
+    var n = Math.max(2, Math.ceil(c * TILE_PX)), u = c / n, set = {}, o = [0, 0, 0], p, k;
+    for (p = 0; p < PARTS.length; p++) {
+      k = PARTS[p];
+      var edge = k.length === 1, rt = SIDE[k][0], bt = SIDE[k][1];
+      var W = k === 't' || k === 'b' ? 2 : n, H = k === 'l' || k === 'r' ? 2 : n;
+      var cv = doc.createElement('canvas');
+      cv.width = W; cv.height = H;
+      var g = cv.getContext('2d'), img = g.createImageData(W, H), px = img.data, x, y;
+      for (y = 0; y < H; y++) {
+        for (x = 0; x < W; x++) {
+          var lx = (x + 0.5) * u, ly = (y + 0.5) * u, i = (y * W + x) * 4;
+          if (edge) {
+            if (k === 't') { texel(px, i, ly, 0, -1, b, 1); }
+            else if (k === 'b') { texel(px, i, c - ly, 0, 1, b, 1); }
+            else if (k === 'l') { texel(px, i, lx, -1, 0, b, 1); }
+            else { texel(px, i, c - lx, 1, 0, b, 1); }
+            continue;
           }
+          var tx = rt ? c - lx : lx, ty = bt ? c - ly : ly, cov = 1, sx, sy;
+          if (tx < r && ty < r) {                       // 圆弧那一格：4×4 超采样算覆盖率，弧外透明
+            cov = 0;
+            for (sy = 0; sy < 4; sy++) {
+              for (sx = 0; sx < 4; sx++) {
+                var ax = (rt ? c - (x + (sx + 0.5) / 4) * u : (x + (sx + 0.5) / 4) * u) - r;
+                var ay = (bt ? c - (y + (sy + 0.5) / 4) * u : (y + (sy + 0.5) / 4) * u) - r;
+                if (ax >= 0 || ay >= 0 || ax * ax + ay * ay <= r * r) { cov += 1 / 16; }
+              }
+            }
+          }
+          corner(tx, ty, r, o);
+          texel(px, i, o[0], rt ? -o[1] : o[1], bt ? -o[2] : o[2], b, cov);
         }
-        ax /= 4; ay /= 4;
-        dx[y * w + x] = ax; dy[y * w + x] = ay;
-        if (Math.abs(ax) > maxd) { maxd = Math.abs(ax); }
-        if (Math.abs(ay) > maxd) { maxd = Math.abs(ay); }
       }
+      g.putImageData(img, 0, 0);
+      set[k] = cv.toDataURL('image/png');
     }
-    var scale = 2 * maxd, c = doc.createElement('canvas');
-    c.width = w; c.height = h;
-    var g = c.getContext('2d'), img = g.createImageData(w, h), px = img.data, i;
-    for (i = 0; i < n; i++) {
-      px[i * 4] = clamp(Math.round(255 * (0.5 + dx[i] / scale)), 0, 255);
-      px[i * 4 + 1] = clamp(Math.round(255 * (0.5 + dy[i] / scale)), 0, 255);
-      px[i * 4 + 2] = 128;
-      px[i * 4 + 3] = 255;
-    }
-    g.putImageData(img, 0, 0);
-    mapCount++;
-    return (maps[key] = { url: c.toDataURL('image/png'), scale: scale, w: w, h: h });
+    tileCount++;
+    return (tileSets[key] = set);
   }
 
   var defs = null, filterSeq = 0;
@@ -333,96 +364,183 @@
     return defs;
   }
 
+  var ONLY = {
+    R: '1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0',
+    G: '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0',
+    B: '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'
+  };
+
   /**
-   * 一块玻璃的滤镜：底下先铺一层 128 灰（= 不位移），贴图叠上去，再做位移。
-   * 贴图没加载出来时是灰底、整片不动——绝不能整片错位。
+   * 一块玻璃的滤镜。disp > 0 时红绿蓝三路分开位移（色散），否则一路。
+   *   位移图：透明的 128 底 + 九宫格八块（贴图没加载出来时那一块是透明的，m = 0，用原图——绝不会整片错位）
+   *   → 位移（放大）→ 按 m^1.6 叠一层模糊 → 按 m 叠一层乳白 → 只在 m 明显的地方用（m × 12 截到 1）→ 按形状裁 → 垫在原图上面
    * color-interpolation-filters 必须是 sRGB（缺省的线性 RGB 会把 128 算成 55 左右，整片往一边偏）；
    * 滤镜区域用缺省值（写 userSpaceOnUse 加 x/y 坐标原点会跑掉）。
+   * 乳白的颜色走令牌 --lg-scatter：深色底上同样的白要淡一半，不然边上一圈发灰。
    */
-  function newFilter() {
-    var id = 'lgf-' + (++filterSeq);
+  function newFilter(disp) {
+    var id = 'lgf-' + (++filterSeq), i;
     var f = svgEl('filter', { id: id, 'color-interpolation-filters': 'sRGB' });
-    f.appendChild(svgEl('feFlood', { 'flood-color': 'rgb(128,128,128)', result: 'flat' }));
-    var im = f.appendChild(svgEl('feImage', { x: '0', y: '0', width: '1', height: '1', preserveAspectRatio: 'none', result: 'm0' }));
-    f.appendChild(svgEl('feComposite', { 'in': 'm0', in2: 'flat', operator: 'over', result: 'map' }));
-    var dm = f.appendChild(svgEl('feDisplacementMap', { 'in': 'SourceGraphic', in2: 'map', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G' }));
+    var F = { id: id, node: f, disp: disp, parts: {}, dm: [], soft: null, veil: null, sig: '' };
+    function fe(name, attrs) { return f.appendChild(svgEl(name, attrs)); }
+    function merge(result, ins) {
+      var m = fe('feMerge', result ? { result: result } : {});
+      for (var j = 0; j < ins.length; j++) { m.appendChild(svgEl('feMergeNode', { 'in': ins[j] })); }
+    }
+    function alpha(input, result, attrs) {
+      var t = fe('feComponentTransfer', { 'in': input, result: result });
+      return t.appendChild(svgEl('feFuncA', attrs));
+    }
+    fe('feFlood', { 'flood-color': 'rgb(128,128,0)', 'flood-opacity': '0', result: 'n0' });
+    var ins = ['n0'];
+    for (i = 0; i < PARTS.length; i++) {
+      F.parts[PARTS[i]] = fe('feImage', { x: '0', y: '0', width: '1', height: '1', preserveAspectRatio: 'none', result: 'p' + PARTS[i] });
+      ins.push('p' + PARTS[i]);
+    }
+    merge('map', ins);
+    if (disp) {
+      for (i = 0; i < 3; i++) {
+        var ch = 'RGB'.charAt(i);
+        F.dm.push(fe('feDisplacementMap', { 'in': 'SourceGraphic', in2: 'map', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G', result: 'd' + ch }));
+        fe('feColorMatrix', { 'in': 'd' + ch, type: 'matrix', values: ONLY[ch], result: 'c' + ch });
+      }
+      fe('feComposite', { 'in': 'cR', in2: 'cG', operator: 'arithmetic', k1: '0', k2: '1', k3: '1', k4: '0', result: 'rg' });
+      fe('feComposite', { 'in': 'rg', in2: 'cB', operator: 'arithmetic', k1: '0', k2: '1', k3: '1', k4: '0', result: 'sharp' });
+    } else {
+      F.dm.push(fe('feDisplacementMap', { 'in': 'SourceGraphic', in2: 'map', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G', result: 'sharp' }));
+    }
+    fe('feColorMatrix', { 'in': 'map', type: 'matrix', values: '0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0', result: 'm' });
+    F.soft = fe('feGaussianBlur', { 'in': 'sharp', stdDeviation: '0.5', result: 'soft' });
+    alpha('m', 'bw', { type: 'gamma', amplitude: '1', exponent: '1.6', offset: '0' });
+    fe('feComposite', { 'in': 'soft', in2: 'bw', operator: 'in', result: 'softIn' });
+    merge('lensed', ['sharp', 'softIn']);
+    var white = fe('feFlood', { 'flood-color': '#ffffff', result: 'white' });
+    white.style.setProperty('flood-color', 'var(--lg-scatter, #ffffff)');
+    F.veil = alpha('m', 'vw', { type: 'linear', slope: '0.05', intercept: '0' });
+    fe('feComposite', { 'in': 'white', in2: 'vw', operator: 'in', result: 'veil' });
+    merge('glowed', ['lensed', 'veil']);
+    alpha('m', 'rw', { type: 'linear', slope: '12', intercept: '0' });
+    fe('feComposite', { 'in': 'glowed', in2: 'rw', operator: 'in', result: 'rim' });
+    fe('feComposite', { 'in': 'rim', in2: 'map', operator: 'in', result: 'shaped' });
+    merge('', ['SourceGraphic', 'shaped']);
     svgDefs().appendChild(f);
-    return { id: id, node: f, img: im, dm: dm, url: '' };
-  }
-  function setMap(F, m) {
-    if (F.url === m.url) { return; }
-    F.url = m.url;
-    F.img.setAttribute('width', String(m.w));
-    F.img.setAttribute('height', String(m.h));
-    F.img.setAttribute('href', m.url);
-    F.img.setAttributeNS(XLINK, 'xlink:href', m.url);
-    F.dm.setAttribute('scale', m.scale.toFixed(2));
+    return F;
   }
   function dropFilter(F) { if (F && F.node.parentNode) { F.node.parentNode.removeChild(F.node); } }
 
   /**
-   * 一块玻璃的折射参数。预设里写死的直接用；data-lg-refract="边宽 隆起 厚度" 照写的用；
-   * data-lg-refract 不给值时按尺寸取：边宽 = 短边 × 0.2（夹在 10–24px），隆起 = 边宽 − 2，厚度 = 边宽 × 0.45。
-   * 规律：面板越大，边越宽、越厚，折弯越明显；小控件边窄，不然整颗都在弯、字看着晃。
+   * 按元素的布局尺寸摆好九宫格、定好强度（look：bezel 边宽、depth 最外缘位移、disp 色散、blur 最外缘模糊、scatter 散射）。
+   * 和上次一样就什么都不做；只是尺寸变了就只挪这八块。
+   */
+  function setGeom(F, w, h, r, look) {
+    w = Math.round(w); h = Math.round(h);
+    var lim = Math.min(w, h) / 2;
+    r = clamp(r, 0, lim);
+    var b = clamp(look.bezel, 2, Math.max(2, lim - 1)), c = Math.max(r, b);
+    var depth = look.depth || b * K, blur = look.blur || 0.5, scat = look.scatter == null ? 0.05 : look.scatter;
+    var sig = w + 'x' + h + '|' + r.toFixed(2) + '|' + b.toFixed(2) + '|' + depth.toFixed(2) + '|' + blur.toFixed(2) + '|' + scat;
+    if (sig === F.sig) { return; }
+    F.sig = sig;
+    var set = tileSet(c, r, b), mid = (w - 2 * c + 2).toFixed(2), tall = (h - 2 * c + 2).toFixed(2), k;
+    var box = {
+      t: [c - 1, 0, mid, c], b: [c - 1, h - c, mid, c], l: [0, c - 1, c, tall], r: [w - c, c - 1, c, tall],
+      tl: [0, 0, c, c], tr: [w - c, 0, c, c], bl: [0, h - c, c, c], br: [w - c, h - c, c, c]
+    };
+    for (k in box) {
+      if (!Object.prototype.hasOwnProperty.call(box, k)) { continue; }
+      var im = F.parts[k], g = box[k];
+      if (im.__url !== set[k]) {
+        im.__url = set[k];
+        im.setAttribute('href', set[k]);
+        im.setAttributeNS(XLINK, 'xlink:href', set[k]);
+      }
+      im.setAttribute('x', String(g[0])); im.setAttribute('y', String(g[1]));
+      im.setAttribute('width', String(g[2])); im.setAttribute('height', String(g[3]));
+    }
+    // feDisplacementMap 取 (C − 0.5) × scale，C 在 0–1 之间，所以 scale = 2 × 最外缘位移。红多折一点、蓝少折一点
+    var s = 2 * depth, d = F.disp || 0;
+    if (F.dm.length === 3) {
+      F.dm[0].setAttribute('scale', (s * (1 + d)).toFixed(2));
+      F.dm[1].setAttribute('scale', s.toFixed(2));
+      F.dm[2].setAttribute('scale', (s * (1 - d)).toFixed(2));
+    } else { F.dm[0].setAttribute('scale', s.toFixed(2)); }
+    F.soft.setAttribute('stdDeviation', Math.max(0.5, blur).toFixed(2));
+    F.veil.setAttribute('slope', String(scat));
+  }
+
+  /**
+   * 透镜和背后的页面之间隔着「背景根」吗：自己或祖先带 filter / backdrop-filter / mask / clip-path / mix-blend-mode。
+   * 有的话 Chromium 只把那个祖先里面的东西交给折射滤镜，输出还会把原图换掉——浮起来是一块发暗的方块。
+   * 检测到就不开折射，只留模糊。透明度不算：页面切换的淡入淡出会误判（它只让玻璃暂时采不到背景，不出方块）。
+   */
+  function isolated(el) {
+    for (var n = el; n && n !== doc.body && n !== root; n = n.parentElement) {
+      var s = win.getComputedStyle(n);
+      if ((s.filter && s.filter !== 'none') || (s.clipPath && s.clipPath !== 'none')
+          || (s.mixBlendMode && s.mixBlendMode !== 'normal')) { return true; }
+      var bf = s.backdropFilter || s.webkitBackdropFilter, mk = s.maskImage || s.webkitMaskImage;
+      if ((bf && bf !== 'none') || (mk && mk !== 'none')) { return true; }
+    }
+    return false;
+  }
+
+  /**
+   * 一块玻璃的折射强度。预设里写的直接用；data-lg-refract="边宽 [最外缘位移]" 照写的用
+   * （三个数是老写法「边宽 隆起 厚度」，第三个数当位移用）；不给值时按尺寸取：边宽 = 短边 × 0.2，夹在 10–24px。
+   * 位移缺省 = 0.45 × 边宽。面板越大，边越宽、折得越多；小控件边窄，不然整颗都在弯、字看着晃。
    */
   function refractParams(el, cfg, w, h) {
-    if (cfg.bezel) { return cfg; }
-    var v = (el.getAttribute('data-lg-refract') || '').split(/[\s,]+/);
-    if (v.length >= 3 && v[0] !== '') { return { bezel: num(v[0], 16), height: num(v[1], 14), thick: num(v[2], 7) }; }
-    var b = clamp(Math.round(Math.min(w, h) * 0.2), 10, 24);
-    return { bezel: b, height: b - 2, thick: Math.round(b * 0.45) };
+    var b = cfg.bezel, d = cfg.depth;
+    if (!b) {
+      var v = (el.getAttribute('data-lg-refract') || '').split(/[\s,]+/);
+      if (v[0] !== '' && !isNaN(parseFloat(v[0]))) {
+        b = num(v[0], 16);
+        d = v.length >= 3 ? num(v[2], 0) : v.length === 2 ? num(v[1], 0) : 0;
+      } else { b = clamp(Math.round(Math.min(w, h) * 0.2), 10, 24); }
+    }
+    return {
+      bezel: b, depth: d || b * K, blur: Math.max(0.5, b * 0.06),
+      disp: cfg.disp == null ? 0.08 : cfg.disp, scatter: cfg.scatter == null ? 0.05 : cfg.scatter
+    };
   }
 
   var refractNodes = [];
   var ro = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(function (entries) {
     for (var i = 0; i < entries.length; i++) {
       var t = entries[i].target;
-      if (t.__lgR) { resized(t); }
+      if (t.__lgR) { refreshRefract(t); }
       if (t.__lgT) { t.__lgT.resized = true; }
     }
     scheduleSync();
   }) : null;
-
-  /**
-   * 尺寸变了：拖窗口时每一帧都在变，每帧重算贴图会卡。先撤掉折射（只剩模糊，看着是干净的），
-   * 停手 140ms 后再按新尺寸算一张。第一次出现（原先是 0 × 0，比如菜单刚打开）直接算。
-   */
-  function resized(el) {
-    var R = el.__lgR;
-    if (!R || !refracting()) { return; }
-    var w = el.offsetWidth, h = el.offsetHeight;
-    if (w < 8 || h < 8 || (w === R.w && h === R.h)) { return; }
-    if (!R.w) { refreshRefract(el); return; }
-    if (el.hasAttribute('data-lg-refract-on')) { el.removeAttribute('data-lg-refract-on'); }
-    clearTimeout(R.timer);
-    R.timer = setTimeout(function () { refreshRefract(el); }, 140);
-  }
 
   function radiusOf(el, w, h) {
     var r = parseFloat(win.getComputedStyle(el).borderTopLeftRadius) || 0;
     return Math.min(r, w / 2, h / 2);
   }
 
+  /** 按此刻的尺寸摆好九宫格并打开折射。尺寸变了（拖窗口、内容重画）也只是挪一挪，不用先撤 */
   function refreshRefract(el) {
     var R = el.__lgR;
     if (!R) { return; }
-    if (!refracting()) {
+    if (!refracting() || isolated(el)) {
       if (el.hasAttribute('data-lg-refract-on')) { el.removeAttribute('data-lg-refract-on'); }
       return;
     }
     var w = el.offsetWidth, h = el.offsetHeight;
     if (w < 8 || h < 8) { return; }                  // 藏着的（display:none）等显出来再算
-    var c = refractParams(el, R.cfg, w, h), r = radiusOf(el, w, h);
-    R.w = w; R.h = h;
-    setMap(R.F, makeMap(w, h, r, Math.min(c.bezel, h / 2 - 1), c.height, c.thick));
-    el.style.setProperty('--lg-ref', 'url(#' + R.F.id + ')');
+    var c = refractParams(el, R.cfg, w, h);
+    if (!R.F || R.F.disp !== c.disp) { dropFilter(R.F); R.F = newFilter(c.disp); }
+    setGeom(R.F, w, h, radiusOf(el, w, h), c);
+    var ref = 'url(#' + R.F.id + ')';
+    if (el.style.getPropertyValue('--lg-ref') !== ref) { el.style.setProperty('--lg-ref', ref); }
     if (el.getAttribute('data-lg-refract-on') !== '') { el.setAttribute('data-lg-refract-on', ''); }
   }
   function refreshAllRefract() { for (var i = 0; i < refractNodes.length; i++) { refreshRefract(refractNodes[i]); } }
 
   function addRefract(el, cfg) {
     if (el.__lgR) { return; }
-    el.__lgR = { cfg: cfg, F: newFilter(), w: 0, h: 0, timer: 0 };
+    el.__lgR = { cfg: cfg, F: null };
     refractNodes.push(el);
     if (ro) { ro.observe(el); }
     refreshRefract(el);
@@ -434,7 +552,6 @@
       var n = refractNodes[i];
       if (!doc.body.contains(n)) {
         if (ro) { ro.unobserve(n); }
-        clearTimeout(n.__lgR.timer);
         dropFilter(n.__lgR.F);
         n.__lgR = null;
         refractNodes.splice(i, 1);
@@ -456,7 +573,9 @@
   function spring(dur, bounce) { return { k: Math.pow(2 * Math.PI / dur, 2), d: 4 * Math.PI * (1 - bounce) / dur }; }
   var SP = {
     pos: spring(0.38, 0.22), fade: spring(0.3, 0), press: spring(0.26, 0.35),
-    lead: spring(0.3, 0.26), lag: spring(0.52, 0.16), same: spring(0.42, 0.18)
+    lead: spring(0.3, 0.26), lag: spring(0.52, 0.16), same: spring(0.42, 0.18),
+    // 分段开关：浮起带一点回弹、落下不回弹；橡皮筋弹回时冲过头压扁一下
+    up: spring(0.38, 0.3), down: spring(0.26, 0), band: spring(0.5, 0.5)
   };
   function step(o, p, v, target, c, dt) {
     var acc = -c.k * (o[p] - target) - c.d * o[v];
@@ -606,6 +725,7 @@
   function lensTo(f, ev) {
     var surf = f.surf, t = f.item, cfg = f.cfg;
     if (mode === 'off' || t.disabled || t.getAttribute('aria-disabled') === 'true' || !visible(t)) { return; }
+    if (surf.__lgT && surf.__lgT.drag && surf.__lgT.drag.moved) { return; }   // 正拖着分段开关的滑块：不要两层玻璃
     if (t.tagName === 'TR' && !t.querySelector('td')) { return; }   // 表头行（表格没写 <thead> 时它也在 tbody 里）不要透镜
     var L = surf.__lgL;
     if (!L || L.surf !== surf || L.cfg !== cfg) {
@@ -716,14 +836,17 @@
     }
   }
 
-  /** 透镜停稳时按它此刻的实际尺寸配一张贴图，折射层再淡入（移动中在变形，贴图跟不上，开着会在字上划出缝） */
+  /**
+   * 透镜停稳时按它此刻的尺寸摆好折射，折射层再淡入。悬停透镜一动就在变形（水滴形、按下的果冻），
+   * 而折射的元素绝不能缩放（一缩放，透过它的东西就被重采样得发糊），所以只在停稳、没有缩放的时候开。
+   */
   function lensMap(L) {
-    if (!L.ref || !refracting() || L.el.hasAttribute('data-onsel')) { return; }
-    if (!L.F) { L.F = newFilter(); L.ref.style.setProperty('--lg-ref', 'url(#' + L.F.id + ')'); }
+    if (!L.ref || !refracting() || L.el.hasAttribute('data-onsel') || isolated(L.surf)) { return; }
+    if (!L.F) { L.F = newFilter(0.06); L.ref.style.setProperty('--lg-ref', 'url(#' + L.F.id + ')'); }
     var w = Math.round(L.w), h = Math.round(L.h);
     if (w < 8 || h < 8) { return; }
     var r = L.rad != null ? Math.min(L.rad, h / 2) : h / 2, bez = Math.min(12, h * 0.32);
-    setMap(L.F, makeMap(w, h, r, bez, bez - 2, bez * 0.42));
+    setGeom(L.F, w, h, r, { bezel: bez, depth: bez * K, blur: Math.max(0.5, h * 0.02), disp: 0.06, scatter: 0.05 });
   }
 
   function lensPointer(L, ev) {
@@ -765,6 +888,9 @@
       if (T) {
         if (T.el && T.el.parentNode) { T.el.parentNode.removeChild(T.el); }
         T.el = null; T.cur = null; T.a = T.ta = T.va = 0;
+        if (T.drag) { T.drag.moved = false; dragStop(T); }
+        dropLift(T); segNear(T, null);
+        T.up = T.tup = T.vup = 0; T.st = T.vst = 0; T.fly = false; segStretch(T);
       }
       th[i].removeAttribute('data-lg-slider-on');
     }
@@ -799,17 +925,35 @@
     var T = {
       surf: surf, cfg: cfg, el: null, cur: null, resized: false, painted: '',
       l: 0, r: 0, t: 0, b: 0, vl: 0, vr: 0, vt: 0, vb: 0, gl: 0, gr: 0, gt: 0, gb: 0,
-      cl: SP.same, cr: SP.same, ct: SP.same, cb: SP.same, a: 0, va: 0, ta: 0, rad: null, w0: 0
+      cl: SP.same, cr: SP.same, ct: SP.same, cb: SP.same, a: 0, va: 0, ta: 0, rad: null, w0: 0,
+      // 分段开关才用（§5.5）：浮起 up、浮着飞 fly、整条被拉长 / 压扁 st（钉住 pin 那一端）、拖动 drag、浮起的透镜 lz
+      up: 0, vup: 0, tup: 0, fly: false, st: 0, vst: 0, pin: 'left', stKey: '', drag: null, lz: null, near: null, pad: 0, userAt: 0
     };
     T.step = function (dt) { return thumbStep(T, dt); };
     T.paint = function () { thumbPaint(T); };
     return T;
   }
 
+  /**
+   * 分段开关：按钮宽度按粗体留——字写进 data-lg-label，样式表在 ::after 里放一份隐形的粗体撑宽，
+   * 选中变粗时不再把旁边的项挤开（拖动时「最近的那一项」也会变粗）。按钮里有图标之类的元素就不动它的排版。
+   * 顺带量轨道的内边距：浮起的透镜按「一行」（滑块高 + 上下内边距）的高度算。
+   */
+  function segPrep(T, list) {
+    for (var i = 0; i < list.length; i++) {
+      var b = list[i];
+      if (b.children.length) { continue; }
+      var txt = (b.textContent || '').replace(/\s+/g, ' ').replace(/^ | $/g, '');
+      if (txt && b.getAttribute('data-lg-label') !== txt) { b.setAttribute('data-lg-label', txt); }
+    }
+    T.pad = parseFloat(win.getComputedStyle(T.surf).paddingTop) || 0;
+  }
+
   function syncThumb(surf, cfg) {
     var T = surf.__lgT;
     if (!T || T.cfg.kind !== cfg.kind) {
       if (T && T.el && T.el.parentNode) { T.el.parentNode.removeChild(T.el); }
+      if (T) { dropLift(T); }
       T = surf.__lgT = newThumb(surf, cfg);
       if (ro) { ro.observe(surf); }
     }
@@ -824,9 +968,14 @@
     }
     if (surf.getAttribute('data-lg-slider-on') !== cfg.kind) { surf.setAttribute('data-lg-slider-on', cfg.kind); }
     var list = surf.querySelectorAll(cfg.items), cur = null, i;
+    if (cfg.kind === 'seg') { segPrep(T, list); }
     for (i = 0; i < list.length; i++) { if (isOn(list[i]) && visible(list[i])) { cur = list[i]; break; } }
     var jump = T.a < 0.05 || calm() || (T.resized && surf.offsetWidth !== T.w0);
     T.resized = false; T.w0 = surf.offsetWidth;
+    if (T.drag && T.drag.moved) {                    // 拖到一半整片重画了：拖动作废，按页面现在的选中落定
+      for (i = 0; i < T.drag.S.length; i++) { if (!surf.contains(T.drag.S[i].el)) { dragStop(T); break; } }
+      if (T.drag) { return; }
+    }
     if (!cur) {
       T.cur = null;
       if (T.ta !== 0) { T.ta = 0; animate(T); }
@@ -840,6 +989,10 @@
       if (danger) { T.el.setAttribute('data-danger', ''); } else { T.el.removeAttribute('data-danger'); }
     }
     if (T.cur === cur && T.ta === 1 && Math.abs(gl - T.gl) + Math.abs(gr - T.gr) + Math.abs(gt - T.gt) + Math.abs(gb - T.gb) < 0.5) { return; }
+    // 用户自己点 / 按键换的（不是页面从外面改的）：分段开关的滑块浮着飞过去，到了再落下
+    if (cfg.kind === 'seg' && T.cur && cur !== T.cur && !jump && !T.drag && liftOn() && Date.now() - T.userAt < 700) {
+      ensureLift(T); T.tup = 1; T.fly = true;
+    }
     // 往哪边走，哪边就是前沿
     T.cl = gl < T.gl ? SP.lead : gl > T.gl ? SP.lag : SP.same;
     T.cr = gr > T.gr ? SP.lead : gr < T.gr ? SP.lag : SP.same;
@@ -852,20 +1005,37 @@
   }
 
   function thumbStep(T, dt) {
+    var held = !!(T.drag && T.drag.moved);            // 拖着的时候位置由手指定，不走弹簧
     if (calm()) {
-      T.l = T.gl; T.r = T.gr; T.t = T.gt; T.b = T.gb; T.a = T.ta; T.vl = T.vr = T.vt = T.vb = T.va = 0;
+      if (!held) { T.l = T.gl; T.r = T.gr; T.t = T.gt; T.b = T.gb; }
+      T.a = T.ta; T.vl = T.vr = T.vt = T.vb = T.va = 0;
+      T.up = T.tup = T.vup = 0; T.st = T.vst = 0; T.fly = false;
       return false;
     }
-    step(T, 'l', 'vl', T.gl, T.cl, dt); step(T, 'r', 'vr', T.gr, T.cr, dt);
-    step(T, 't', 'vt', T.gt, T.ct, dt); step(T, 'b', 'vb', T.gb, T.cb, dt);
+    if (!held) {
+      step(T, 'l', 'vl', T.gl, T.cl, dt); step(T, 'r', 'vr', T.gr, T.cr, dt);
+      step(T, 't', 'vt', T.gt, T.ct, dt); step(T, 'b', 'vb', T.gb, T.cb, dt);
+    }
     step(T, 'a', 'va', T.ta, SP.fade, dt);
+    var busy = Math.abs(T.a - T.ta) > 0.004 || Math.abs(T.va) > 0.03;
+    if (T.cfg.kind === 'seg') {
+      step(T, 'up', 'vup', T.tup, T.tup ? SP.up : SP.down, dt);
+      if (!held) { step(T, 'st', 'vst', 0, SP.band, dt); }
+      // 浮着飞过去的：中心到了就落下（液态滑块的后沿还在追，落下那 0.26 秒里正好追上）
+      if (T.fly && !T.drag && Math.abs(T.l + T.r - T.gl - T.gr) < 8) { T.fly = false; T.tup = 0; segNear(T, null); }
+      var moving = T.fly || Math.abs(T.up - T.tup) > 0.005 || Math.abs(T.vup) > 0.05
+        || (!held && (Math.abs(T.st) > 0.0002 || Math.abs(T.vst) > 0.003));
+      if (!moving) { T.up = T.tup; T.vup = 0; if (!held) { T.st = T.vst = 0; } }
+      busy = busy || moving;
+    }
+    if (held) { return busy; }
     // 拉长有上限：跳得远时后沿不能拖成一整条，最多比落点那一项长出 44px（横向 56px），后沿被前沿拽着走
     var maxV = T.gb - T.gt + 44, maxH = T.gr - T.gl + 56;
     if (T.b - T.t > maxV) { if (T.ct === SP.lag) { T.t = T.b - maxV; } else if (T.cb === SP.lag) { T.b = T.t + maxV; } }
     if (T.r - T.l > maxH) { if (T.cl === SP.lag) { T.l = T.r - maxH; } else if (T.cr === SP.lag) { T.r = T.l + maxH; } }
     var off = Math.abs(T.l - T.gl) + Math.abs(T.r - T.gr) + Math.abs(T.t - T.gt) + Math.abs(T.b - T.gb);
     var vel = Math.abs(T.vl) + Math.abs(T.vr) + Math.abs(T.vt) + Math.abs(T.vb);
-    var done = off < 0.3 && vel < 6 && Math.abs(T.a - T.ta) < 0.004 && Math.abs(T.va) < 0.03;
+    var done = off < 0.3 && vel < 6 && !busy;
     if (done) { T.l = T.gl; T.r = T.gr; T.t = T.gt; T.b = T.gb; T.a = T.ta; T.vl = T.vr = T.vt = T.vb = T.va = 0; }
     return !done;
   }
@@ -873,15 +1043,30 @@
   function thumbPaint(T) {
     if (!T.el) { return; }
     var a = clamp(T.a, 0, 1), w = Math.max(0, T.r - T.l), h = Math.max(0, T.b - T.t), s = 0.9 + 0.1 * a;
+    var sx = s, sy = s, op = a;
+    if (T.cfg.kind === 'seg') {
+      var up = clamp(T.up, 0, 1.3), Z = T.lz && T.lz.el.parentNode === T.surf ? T.lz : null, L = null;
+      if (Z && (up > 0.01 || T.tup) && w > 0 && h > 0) {
+        // 有透镜：平胶囊一边放大到透镜的大小一边化开，同一时刻透镜的边从平胶囊的大小长出来——看上去是同一块玻璃浮起来
+        L = liftRect(T);
+        sx *= 1 + (L.w / w - 1) * up; sy *= 1 + (L.h / h - 1) * up;
+        op *= Math.max(0, 1 - up * 1.5);
+      } else {
+        sx *= 1 + 0.05 * up; sy *= 1 + 0.1 * up;     // 不能折射：滑块自己放大一点，就是「按住了」
+      }
+      segStretch(T);
+      liftPaint(T, Z, L, w, h, up);
+    }
     var rad = T.rad != null ? T.rad : h / 2;
-    var key = T.l.toFixed(2) + '|' + T.t.toFixed(2) + '|' + w.toFixed(2) + '|' + h.toFixed(2) + '|' + a.toFixed(3) + '|' + rad;
+    var key = T.l.toFixed(2) + '|' + T.t.toFixed(2) + '|' + w.toFixed(2) + '|' + h.toFixed(2) + '|' + op.toFixed(3) + '|'
+      + sx.toFixed(4) + '|' + sy.toFixed(4) + '|' + rad;
     if (key === T.painted) { return; }
     T.painted = key;
     T.el.style.width = w.toFixed(2) + 'px';
     T.el.style.height = h.toFixed(2) + 'px';
     T.el.style.borderRadius = Math.min(rad, h / 2, w / 2).toFixed(2) + 'px';
-    T.el.style.transform = 'translate3d(' + T.l.toFixed(2) + 'px,' + T.t.toFixed(2) + 'px,0) scale(' + s.toFixed(4) + ')';
-    T.el.style.opacity = a.toFixed(3);
+    T.el.style.transform = 'translate3d(' + T.l.toFixed(2) + 'px,' + T.t.toFixed(2) + 'px,0) scale(' + sx.toFixed(4) + ',' + sy.toFixed(4) + ')';
+    T.el.style.opacity = op.toFixed(3);
   }
 
   function syncThumbs() {
@@ -898,6 +1083,170 @@
       list = doc.querySelectorAll(SLIDER[i].sel);
       for (j = 0; j < list.length; j++) { if (done.indexOf(list[j]) < 0) { syncThumb(list[j], SLIDER[i]); } }
     }
+  }
+
+  /* ══ 5.5 分段开关：按住浮起、拖、橡皮筋、甩 ═════════════════════════════
+   *
+   * 照 iOS 26 的标签栏：
+   *   · 按住选中的那一项，滑块浮起成一块清玻璃透镜（比这一行高两成、比项左右各宽 7px），盖在字上面，
+   *     边上把底下的字放大、弯折；松手落回去。浮起带一点回弹，落下不回弹。
+   *   · 按住拖：透镜跟着手指走，宽度在相邻两项之间过渡；离得最近的那一项先变成选中的样子。
+   *     松手落到最近的一项；快速一甩（≥ 0.6 px/ms）往甩的方向再走一格（最多一格）。
+   *   · 拖过两端：整条像橡皮筋被拉长，越拉越费劲，最多拉长轨道宽的 5%（≤ 18px）；松手弹回、略压扁一下再停。
+   *     大力一甩，整条朝甩的方向形变（≤ 3.5%）再回弹。钉住的是另一端，所以是朝手指那边变形。
+   *   · 点别的项（或用键盘换选中）：滑块浮着飞过去，到了再落下。
+   * 选中由页面决定：拖完松手，脚本替用户「点」一下落到的那一项（element.click()），页面照常处理；
+   * 紧跟在拖动后面、浏览器自己补的那一下 click 被吞掉，不然它会把选中又点回原处。
+   * 透镜只平移、绝不缩放（缩放会把透过它的东西重采样得发糊）；尺寸跟着项宽变，只挪九宫格。
+   * 「精简」与「减少动态效果」：照样能拖，但不浮起、不拉长、不回弹；「关闭」没有滑块，也就不能拖。
+   */
+  var FLICK = 0.6, dragT = null, eatClick = null;
+  // 甩出去时给橡皮筋的初速度：阻尼比 0.5 的弹簧，从 0 出发、初速 v0，最远到 0.546·v0/ω
+  var BAND_KICK = 2 * Math.PI / 0.5 / 0.546;
+
+  function liftOn() { return mode === 'full' && !still; }
+
+  /**
+   * 浮起来的那块透镜（追加在分段开关末尾，z 3，盖在字上面）。能折射才要它（Chromium、「完整」、和页面之间没有背景根）；
+   * 不能折射时不要——一块不折射的清玻璃只是一个空框，这时滑块自己放大一点就是「按住了」。
+   */
+  function ensureLift(T) {
+    var Z = T.lz;
+    if (!refracting() || isolated(T.surf)) { dropLift(T); return null; }
+    if (Z && Z.el.parentNode === T.surf) { return Z; }
+    dropLift(T);
+    var el = doc.createElement('span'), ref = doc.createElement('span'), rim = doc.createElement('span');
+    el.className = 'lg-lift'; ref.className = 'lg-lift-ref'; rim.className = 'lg-lift-rim';
+    el.setAttribute('aria-hidden', 'true');
+    el.appendChild(ref); el.appendChild(rim);
+    T.surf.appendChild(el);
+    var F = newFilter(0.1);
+    ref.style.setProperty('--lg-ref', 'url(#' + F.id + ')');
+    return (T.lz = { el: el, ref: ref, rim: rim, F: F, key: '' });
+  }
+  function dropLift(T) {
+    var Z = T.lz;
+    if (!Z) { return; }
+    if (Z.el.parentNode) { Z.el.parentNode.removeChild(Z.el); }
+    dropFilter(Z.F);
+    T.lz = null;
+  }
+
+  /**
+   * 透镜摆在哪、多大：中心永远是滑块中心（字在正中）；比这一行高两成，伸出上下沿；比项左右各宽 7px。
+   * 停在两端时两边对称收窄、不伸出轨道（整块往里挪的话字就不在正中了）。
+   * 拖着的时候宽度跟着手指下的滑块走；飞的时候是终点那一项的宽度——飞行中只平移、不变形。
+   */
+  function liftRect(T) {
+    var cx = (T.l + T.r) / 2, cy = (T.t + T.b) / 2;
+    var base = T.drag && T.drag.moved ? T.r - T.l : T.gr - T.gl;
+    var H = Math.round((T.gb - T.gt + 2 * T.pad) * 1.2), room = 2 * Math.min(cx, T.w0 - cx);
+    var W = Math.round(Math.max(base, Math.min(Math.max(H, base + 14), room)));
+    return { x: cx - W / 2, y: cy - H / 2, w: W, h: H };
+  }
+
+  function liftPaint(T, Z, L, w, h, up) {
+    if (!Z) { return; }
+    if (!L) { if (Z.el.hasAttribute('data-up')) { Z.el.removeAttribute('data-up'); Z.key = ''; } return; }
+    if (!Z.el.hasAttribute('data-up')) { Z.el.setAttribute('data-up', ''); }
+    var key = L.x.toFixed(2) + '|' + L.y.toFixed(2) + '|' + L.w + '|' + L.h + '|' + up.toFixed(3) + '|' + w.toFixed(1) + '|' + h.toFixed(1);
+    if (key === Z.key) { return; }
+    Z.key = key;
+    Z.el.style.width = L.w + 'px';
+    Z.el.style.height = L.h + 'px';
+    Z.el.style.transform = 'translate3d(' + L.x.toFixed(2) + 'px,' + L.y.toFixed(2) + 'px,0)';
+    // 透镜：斜面占半高的六成，正中约四成高原样透出；色散比面板略重（字就在它底下）
+    var bez = 0.3 * L.h;
+    setGeom(Z.F, L.w, L.h, L.h / 2, { bezel: bez, depth: bez * K, blur: Math.max(0.5, L.h * 0.024), disp: 0.1, scatter: 0.06 });
+    Z.ref.style.opacity = clamp((up - 0.15) / 0.6, 0, 1).toFixed(3);
+    // 边：从平胶囊的大小长到透镜的大小（浮起的回弹让它略大一点再收回），很快淡入
+    var rx = w / L.w + (1 - w / L.w) * up, ry = h / L.h + (1 - h / L.h) * up;
+    Z.rim.style.transform = 'scale(' + rx.toFixed(4) + ',' + ry.toFixed(4) + ')';
+    Z.rim.style.opacity = clamp(up * 2, 0, 1).toFixed(3);
+  }
+
+  /** 拖过两端整条被拉长（st > 0）、弹回时略压扁（st < 0）：钉住 pin 那一端；横向拉长时竖向收一点，看着是同一团东西被拉长 */
+  function segStretch(T) {
+    var st = Math.abs(T.st) < 0.0002 ? 0 : T.st, key = st ? st.toFixed(4) + T.pin : '';
+    if (key === T.stKey) { return; }
+    T.stKey = key;
+    var s = T.surf.style;
+    if (!st) { s.transform = ''; s.transformOrigin = ''; return; }
+    s.transform = 'scale(' + (1 + st).toFixed(4) + ',' + (1 - st * 0.35).toFixed(4) + ')';
+    s.transformOrigin = T.pin === 'right' ? '100% 50%' : '0 50%';
+  }
+
+  /** 指针下的分段开关，和指针在哪一项上 */
+  function segAt(node) {
+    var el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    for (var a = el; a && a !== doc.body; a = a.parentElement) {
+      var T = a.__lgT;
+      if (T && T.el && T.cfg.kind === 'seg' && a.getAttribute('data-lg-slider-on') === 'seg') {
+        var it = el.closest(T.cfg.items);
+        return it && it !== a && a.contains(it) ? { T: T, item: it } : null;
+      }
+    }
+    return null;
+  }
+
+  /** 能停的位置（各项的位置与宽度）。折成多行的不拖：横着拖没法跨行 */
+  function segStops(T) {
+    var list = T.surf.querySelectorAll(T.cfg.items), out = [], i;
+    for (i = 0; i < list.length; i++) {
+      if (!visible(list[i])) { continue; }
+      var r = relRect(T.surf, list[i]);
+      if (out.length && Math.abs(r.y - out[0].y) > 2) { return null; }
+      r.el = list[i];
+      out.push(r);
+    }
+    return out.length > 1 ? out : null;
+  }
+
+  /** 手指拖到 c 时滑块的左边和宽度：宽度在相邻两项之间按位置过渡；两端钉住 */
+  function dragThumb(S, c) {
+    var last = S[S.length - 1], i = 1;
+    c = clamp(c, S[0].x + S[0].w / 2, last.x + last.w / 2);
+    while (i < S.length - 1 && S[i].x + S[i].w / 2 < c) { i++; }
+    var A = S[i - 1], B = S[i], ca = A.x + A.w / 2, cb = B.x + B.w / 2;
+    var w = A.w + (B.w - A.w) * (cb > ca ? clamp((c - ca) / (cb - ca), 0, 1) : 0);
+    return { l: clamp(c - w / 2, S[0].x, last.x + last.w - w), w: w };
+  }
+  function nearest(S, x) {
+    var best = S[0];
+    for (var i = 1; i < S.length; i++) { if (Math.abs(S[i].x + S[i].w / 2 - x) < Math.abs(best.x + best.w / 2 - x)) { best = S[i]; } }
+    return best;
+  }
+  /** 松手落到哪一项：慢慢拖到哪就是哪（松手那一下带的一点速度不算）；快速一甩往甩的方向最多再走一格 */
+  function snapStop(S, c, v) {
+    var here = nearest(S, c);
+    if (Math.abs(v) < FLICK) { return here; }
+    var from = S.indexOf(here), to = S.indexOf(nearest(S, c + clamp(v * 110, -90, 90)));
+    return S[from + clamp(to - from, -1, 1)] || here;
+  }
+  /** 手指拖过第一项 / 最后一项的中心多远（带方向），换成整条被拉长多少像素：越拉越费劲，永远到不了 max */
+  function rubber(S, c, max) {
+    var lo = S[0].x + S[0].w / 2, hi = S[S.length - 1].x + S[S.length - 1].w / 2;
+    var over = c < lo ? c - lo : c > hi ? c - hi : 0;
+    if (!over || max <= 0) { return 0; }
+    return (over < 0 ? -1 : 1) * max * (1 - 1 / (Math.abs(over) / max * 0.55 + 1));
+  }
+  function segNear(T, el) {
+    if (T.near === el) { return; }
+    if (T.near) { T.near.removeAttribute('data-lg-near'); }
+    T.near = el;
+    if (el) { el.setAttribute('data-lg-near', ''); }
+  }
+
+  /** 拖动收场：撤掉拖动状态与指针捕获 */
+  function dragStop(T) {
+    var D = T.drag;
+    if (dragT === T) { dragT = null; }
+    T.drag = null;
+    if (!D) { return; }
+    if (T.surf.hasAttribute('data-lg-drag')) { T.surf.removeAttribute('data-lg-drag'); }
+    try { if (T.surf.hasPointerCapture && T.surf.hasPointerCapture(D.id)) { T.surf.releasePointerCapture(D.id); } } catch (e) {}
+    if (!D.moved) { T.tup = 0; }
+    animate(T);
   }
 
   /* ══ 6 HDR 高光 ═════════════════════════════════════════════════════════
@@ -1060,7 +1409,11 @@
   }
   doc.addEventListener('mouseup', release, true);
   win.addEventListener('blur', release);
-  doc.addEventListener('keydown', function () { if (tipFor) { tipHide(); } }, true);
+  doc.addEventListener('keydown', function (ev) {
+    if (tipFor) { tipHide(); }
+    var f = segAt(ev.target);                        // 键盘在分段开关里换选中：滑块也浮着飞过去
+    if (f) { f.T.userAt = Date.now(); }
+  }, true);
   win.addEventListener('scroll', function () { if (tipFor) { tipHide(); } }, true);
 
   doc.addEventListener('mousemove', function (ev) {
@@ -1083,6 +1436,88 @@
       if (lenses[i].hover && lenses[i].surf.contains(ev.target)) { lensPointer(lenses[i], ev); }
     }
   }
+
+  // 分段开关：按住浮起、拖、橡皮筋、甩（§5.5）
+  doc.addEventListener('pointerdown', function (ev) {
+    if (mode === 'off' || !ev.isPrimary || ev.button !== 0 || dragT) { return; }
+    var f = segAt(ev.target);
+    if (!f) { return; }
+    var T = f.T, it = f.item;
+    T.userAt = Date.now();
+    // 按在别的项上是点击：页面换了选中，滑块再浮着飞过去
+    if (it !== T.cur || it.disabled || it.getAttribute('aria-disabled') === 'true') { return; }
+    var S = segStops(T);
+    if (!S) { return; }
+    T.st = T.vst = 0; segStretch(T);                  // 上一次的回弹还没停：先收住再量
+    var k = (T.surf.getBoundingClientRect().width / T.surf.offsetWidth) || 1;
+    T.drag = { id: ev.pointerId, x0: ev.clientX, c0: (T.gl + T.gr) / 2, c: (T.gl + T.gr) / 2, k: k, S: S,
+      lastX: ev.clientX, t: ev.timeStamp, v: 0, moved: false };
+    dragT = T;
+    if (liftOn()) { ensureLift(T); T.tup = 1; T.fly = false; animate(T); }   // 一按下就浮起来
+  }, true);
+
+  doc.addEventListener('pointermove', function (ev) {
+    var T = dragT;
+    if (!T || !T.drag || ev.pointerId !== T.drag.id) { return; }
+    var D = T.drag, dx = (ev.clientX - D.x0) / D.k;
+    if (!D.moved) {
+      if (Math.abs(dx) < 5) { return; }
+      D.moved = true;
+      // 动起来才捕获指针：只按一下不动的话，click 还落在按钮上，页面照常处理
+      try { T.surf.setPointerCapture(D.id); } catch (e) {}
+      T.surf.setAttribute('data-lg-drag', '');
+      tipHide();
+      var L = T.surf.__lgL;                          // 悬停透镜让开：不要两层玻璃
+      if (L) { L.hover = L.focus = false; L.ta = 0; L.cur = null; animate(L); }
+    }
+    // 速度做一阶低通：高回报率鼠标每个事件的差分都在跳
+    D.v += ((ev.clientX - D.lastX) / D.k / Math.max(1, ev.timeStamp - D.t) - D.v) * 0.35;
+    D.lastX = ev.clientX; D.t = ev.timeStamp; D.c = D.c0 + dx;
+    var g = dragThumb(D.S, D.c);
+    T.l = g.l; T.r = g.l + g.w; T.vl = T.vr = D.v * 1000;
+    if (!calm()) {
+      var px = rubber(D.S, D.c, Math.min(18, T.w0 * 0.05));
+      T.st = Math.abs(px) / (T.w0 || 1); T.vst = 0;
+      if (px) { T.pin = px < 0 ? 'right' : 'left'; }
+    }
+    segNear(T, nearest(D.S, D.c).el);
+    if (ev.cancelable) { ev.preventDefault(); }
+    animate(T);
+  }, true);
+
+  function dragEnd(ev) {
+    var T = dragT;
+    if (!T || !T.drag || ev.pointerId !== T.drag.id) { return; }
+    var D = T.drag;
+    dragStop(T);
+    if (!D.moved) { return; }                        // 只是按了一下：落回去，点击照常交给页面
+    // 指针被系统收走（pointercancel）时按此刻的位置落定，不算甩
+    var v = ev.type === 'pointerup' && ev.timeStamp - D.t < 90 ? D.v : 0;
+    var to = snapStop(D.S, D.c, v);
+    if (!calm() && Math.abs(v) >= FLICK && Math.abs(T.st) < 0.0002) {
+      T.pin = v > 0 ? 'left' : 'right';              // 大力一甩：整条朝甩的方向形变，再回弹
+      T.vst = Math.min(0.035, Math.abs(v) * 0.012) * BAND_KICK;
+    }
+    // 先按落点飞过去（浮着飞，到了再落下）；页面换了选中后再对一遍，也还是这里
+    T.fly = T.tup > 0;
+    T.cl = to.x < T.l ? SP.lead : SP.lag; T.cr = to.x + to.w > T.r ? SP.lead : SP.lag;
+    T.gl = to.x; T.gr = to.x + to.w; T.cur = to.el;
+    segNear(T, to.el);
+    eatClick = T.surf;
+    setTimeout(function () {
+      eatClick = null;
+      if (T.surf.contains(to.el) && !isOn(to.el)) { to.el.click(); }
+      if (!T.fly) { segNear(T, null); }
+      scheduleSync();                                // 页面没接受这次选中：滑块回到真正选中的那一项
+    }, 0);
+    animate(T);
+  }
+  doc.addEventListener('pointerup', dragEnd, true);
+  doc.addEventListener('pointercancel', dragEnd, true);
+  // 拖完松手，浏览器还会补一下 click（落在按下的那一项或整条上），吞掉它；脚本自己点的那一下（isTrusted 为假）放行
+  doc.addEventListener('click', function (ev) {
+    if (eatClick && ev.isTrusted !== false && eatClick.contains(ev.target)) { ev.stopPropagation(); ev.preventDefault(); }
+  }, true);
 
   // 三档开关：任何带 data-lg-mode-set="full|lite|off" 的按钮
   doc.addEventListener('click', function (ev) {
@@ -1158,7 +1593,7 @@
   root.setAttribute('data-lg-js', '');
 
   win.LiquidGlass = {
-    version: '1.0.0',
+    version: '1.1.0',
     /** 用户选的档：'auto' | 'full' | 'lite' | 'off' */
     mode: function () { return pref(); },
     /** 实际的材质档：'l0' | 'l1' | 'l2' | 'l3' */

@@ -1,5 +1,5 @@
 /*!
- * Liquid Glass UI —— 样式 v1.0.0
+ * Liquid Glass UI —— 样式 v1.1.0
  *
  * 一套照 Apple Liquid Glass 做的网页材质与组件：控制层（侧栏、页头胶囊、弹出层、工具条、提示）是玻璃，
  * 内容层（卡片、表格）是不透光的「实心厚玻璃」。动效与折射由同目录的 liquid-glass.js 驱动，
@@ -13,7 +13,7 @@
  *   4 实心厚玻璃 .lg-card               13 表格 .lg-table-wrap / .lg-table
  *   5 按钮 .lg-btn                      14 浮动提示 .lg-toasts / .lg-toast、玻璃提示 .lg-tip
  *   6 玻璃胶囊 .lg-chip                 15 说明与报错 .lg-note / .lg-alert、浮起的卡片 .lg-dialog
- *   7 输入框 .lg-field                  16 透镜、液态滑块、HDR 高光（liquid-glass.js 插入的元素）
+ *   7 输入框 .lg-field                  16 透镜、液态滑块、浮起的透镜、HDR 高光（脚本插入的）
  *   8 分段开关 .lg-seg                  17 三档：精简 / 关闭
  *   9 侧栏 .lg-sidebar / .lg-nav        18 无障碍、打印、老浏览器
  *
@@ -109,6 +109,12 @@
   --lg-hl-onsel-tint: rgba(255, 255, 255, .08);
   --lg-hl-rim: linear-gradient(165deg, #ffffff, rgba(255, 255, 255, .35) 30%, rgba(15, 23, 42, .04) 62%, rgba(15, 23, 42, .16));
   --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .95), inset 0 -1px 2px rgba(15, 23, 42, .07);
+  /* 折射的玻璃边上那层很淡的乳白（散射）。深色底上同样的白要淡一半，不然边上一圈发灰 */
+  --lg-scatter: #ffffff;
+  /* 分段开关按住时浮起的那块清玻璃：里面不铺色；一圈极淡的描边 + 浮起的影子，左上、右下两道斜对角高光 */
+  --lg-lift-sh: 0 0 0 .5px rgba(15, 23, 42, .14), 0 8px 18px -8px rgba(15, 23, 42, .3);
+  --lg-lift-spec: conic-gradient(from 0deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, .2) 70deg, rgba(255, 255, 255, .2) 100deg,
+    rgba(255, 255, 255, .9) 140deg, rgba(255, 255, 255, .2) 185deg, rgba(255, 255, 255, .2) 265deg, #ffffff 310deg, rgba(255, 255, 255, .5));
   --lg-toast-good: rgba(226, 245, 234, .82);
   --lg-toast-bad: rgba(252, 230, 230, .86);
 }
@@ -168,6 +174,10 @@
   --lg-hl-onsel-tint: rgba(255, 255, 255, .06);
   --lg-hl-rim: linear-gradient(165deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .1) 30%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .22));
   --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 -1px 2px rgba(0, 0, 0, .3);
+  --lg-scatter: rgba(255, 255, 255, .45);
+  --lg-lift-sh: 0 0 0 .5px rgba(255, 255, 255, .1), 0 8px 18px -8px rgba(0, 0, 0, .5);
+  --lg-lift-spec: conic-gradient(from 0deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .05) 70deg, rgba(255, 255, 255, .05) 100deg,
+    rgba(255, 255, 255, .62) 140deg, rgba(255, 255, 255, .05) 185deg, rgba(255, 255, 255, .05) 265deg, rgba(255, 255, 255, .78) 310deg, rgba(255, 255, 255, .16));
   --lg-toast-good: rgba(20, 48, 31, .82);
   --lg-toast-bad: rgba(56, 27, 27, .84);
 }
@@ -228,6 +238,10 @@
     --lg-hl-onsel-tint: rgba(255, 255, 255, .06);
     --lg-hl-rim: linear-gradient(165deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .1) 30%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .22));
     --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 -1px 2px rgba(0, 0, 0, .3);
+    --lg-scatter: rgba(255, 255, 255, .45);
+    --lg-lift-sh: 0 0 0 .5px rgba(255, 255, 255, .1), 0 8px 18px -8px rgba(0, 0, 0, .5);
+    --lg-lift-spec: conic-gradient(from 0deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .05) 70deg, rgba(255, 255, 255, .05) 100deg,
+      rgba(255, 255, 255, .62) 140deg, rgba(255, 255, 255, .05) 185deg, rgba(255, 255, 255, .05) 265deg, rgba(255, 255, 255, .78) 310deg, rgba(255, 255, 255, .16));
     --lg-toast-good: rgba(20, 48, 31, .82);
     --lg-toast-bad: rgba(56, 27, 27, .84);
   }
@@ -423,8 +437,20 @@ select.lg-field {
 }
 /* 有液态滑块时选中项自己不画底，底是滑块 */
 .lg-seg[data-lg-slider-on] > button[aria-pressed="true"], .lg-seg[data-lg-slider-on] > button[aria-selected="true"] {
-  background: transparent; box-shadow: none;
+  background: transparent; box-shadow: none; cursor: grab;
 }
+/* 按钮宽度按粗体留：脚本把字写进 data-lg-label，::after 里放一份隐形的粗体撑宽——选中变粗时不把旁边的项挤开 */
+.lg-seg > button[data-lg-label] { display: inline-grid; align-content: center; justify-items: center; }
+.lg-seg > button[data-lg-label]::after {
+  content: attr(data-lg-label); height: 0; overflow: hidden; visibility: hidden; font-weight: 600; pointer-events: none;
+}
+/* 能按住拖（§16 的浮起透镜）：不选中文字；竖着划照样滚页面 */
+.lg-seg[data-lg-slider-on] { -webkit-user-select: none; user-select: none; touch-action: pan-y; }
+.lg-seg[data-lg-drag], .lg-seg[data-lg-drag] > button { cursor: grabbing; }
+/* 拖动中：离滑块最近的那一项先变成选中的样子，原来选中的那一项退回普通 */
+.lg-seg[data-lg-drag] > button { color: var(--lg-ink-2); font-weight: 400; }
+.lg-seg--sm[data-lg-drag] > button { font-weight: 600; }
+.lg-seg[data-lg-drag] > button[data-lg-near] { color: var(--lg-ink); font-weight: 600; }
 .lg-seg--sm { padding: 2px; border-radius: 15px; }
 .lg-seg--sm > button { height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600; }
 .lg-seg--block { display: flex; }
@@ -707,7 +733,7 @@ html:not([data-lg-js]) .lg-mode-row { display: none; }
 }
 .lg-center { position: relative; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 
-/* ══ 16 透镜、液态滑块、HDR 高光 ════════════════════════════════════════
+/* ══ 16 透镜、液态滑块、浮起的透镜、HDR 高光 ═════════════════════════════
  * 这些元素由 liquid-glass.js 插入，位置、形变、透明度按弹簧逐帧写进来（transform / --a / --p），这里只管长相。
  */
 
@@ -788,6 +814,25 @@ html:not([data-lg-lens]) .lg-icon-btn:hover, html:not([data-lg-lens]) .lg-pill-b
   background: radial-gradient(120% 90% at 20% -30%, rgba(255, 255, 255, .42), rgba(255, 255, 255, 0) 55%);
 }
 
+/* 分段开关按住时浮起来的那块清玻璃（iOS 26 的标签栏）：盖在字上面（z 3），边上把底下的字放大、弯折。
+   外层只平移；里面两层：折射层只淡入淡出、绝不缩放（一缩放，透过它的东西就被重采样得发糊），
+   边（描边 + 浮起的影子 + 左上 / 右下两道斜对角高光）浮起 / 落下时从平胶囊的大小长出来。
+   不浮着的时候 visibility: hidden——透明度为 0 的 backdrop-filter 照样每帧要算 */
+.lg-lift {
+  position: absolute; left: 0; top: 0; width: 0; height: 0; margin: 0 !important; z-index: 3;
+  pointer-events: none; border-radius: 999px; visibility: hidden; will-change: transform;
+}
+.lg-lift[data-up] { visibility: visible; }
+.lg-lift > span { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: inherit; opacity: 0; }
+html[data-lg-tier="l2"] .lg-lift-ref, html[data-lg-tier="l3"] .lg-lift-ref { backdrop-filter: var(--lg-ref); }
+.lg-lift-rim { box-shadow: var(--lg-lift-sh); transform-origin: 50% 50%; }
+.lg-lift-rim::before {
+  content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: inherit; padding: 1.2px;
+  background: var(--lg-lift-spec);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+
 /* HDR 高光贴片：只在 l3 + HDR 屏出现，普通屏上一个像素都不画 */
 .lg-hdr { display: none; position: absolute; top: 0; height: 6px; margin: 0 !important; z-index: 4; pointer-events: none; }
 @media (dynamic-range: high) { html[data-lg-tier="l3"] .lg-hdr { display: block; } }
@@ -814,7 +859,7 @@ html[data-lg-mode="off"] { --lg-rim: none; --lg-sheen: none; }
 @media (prefers-reduced-transparency: reduce) {
   .lg-glass::before { background: var(--lg-s, var(--lg-solid)); -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
   .lg-lens > .lg-lens-glass { background: var(--lg-hl-solid); }
-  .lg-lens > .lg-lens-ref { display: none !important; }
+  .lg-lens > .lg-lens-ref, .lg-lift { display: none !important; }
 }
 /* 系统要求增强对比度：去掉半透明的高光环，换一圈实线 */
 @media (prefers-contrast: more) {
@@ -833,7 +878,7 @@ html[data-lg-mode="off"] { --lg-rim: none; --lg-sheen: none; }
   .lg-head .lg-chip .lg-kbd { display: none; }
 }
 @media print {
-  .lg-lens, .lg-thumb, .lg-hdr, .lg-tip, .lg-toasts, .lg-scrim, .lg-menu { display: none !important; }
+  .lg-lens, .lg-lift, .lg-thumb, .lg-hdr, .lg-tip, .lg-toasts, .lg-scrim, .lg-menu { display: none !important; }
   .lg-glass::before { background: #ffffff; -webkit-backdrop-filter: none; backdrop-filter: none; }
   .lg-sidebar { display: none; }
 }

@@ -100,8 +100,8 @@
 | `data-lg-rad="10"` | 同上 | 透镜圆角；不写就照项自己的圆角 |
 | `data-lg-under` | 同上 | 整行形态：只垫亮板，不折射、不跟手、没有光斑（表格行一类） |
 | `data-lg-slider="项的选择器"` | 多选一的容器 | 选中项底下一块液态滑块。不给值时项是 `.lg-item` |
-| `data-lg-kind="seg|nav|cursor"` | 同上 | 滑块长相：白玻璃 / 蓝色（危险项红色）/ 主色浅玻璃光标 |
-| `data-lg-refract` 或 `="边宽 隆起 厚度"` | 一块 `.lg-glass` | 打开折射（只在 l2 / l3 生效）；不给值按尺寸取 |
+| `data-lg-kind="seg|nav|cursor"` | 同上 | 滑块长相：白玻璃 / 蓝色（危险项红色）/ 主色浅玻璃光标。`seg` 还能按住浮起、拖（第 7.3 节） |
+| `data-lg-refract` 或 `="边宽 [最外缘位移]"` | 一块 `.lg-glass` | 打开折射（只在 l2 / l3 生效）：边上那一圈放大、模糊、泛一点乳白和彩边，正中原样。不给值按尺寸取（边宽 = 短边 × 0.2，夹在 10–24px；位移 = 0.45 × 边宽）。老写法「边宽 隆起 厚度」三个数照样认，第三个数当位移用 |
 | `data-lg-hdr` 或 `="top bottom"` | 一块 `.lg-glass` | HDR 屏上上沿（和下沿）一道比白更亮的高光 |
 | `data-lg-tip` / `data-lg-tip="right"` | 元素或容器 | 把里面的 `title` 换成玻璃提示；`right` 表示出现在容器右边 |
 | `data-lg-glow` | 任意可点的元素 | 写 `--mx` / `--my`，配合自己的 `radial-gradient` 做指尖光 |
@@ -140,7 +140,7 @@ window.LiquidGlassConfig = {
   presets: true,               // false：不认组件类，只认 data 属性
   lens: [ /* 整组替换透镜预设：{ sel, items, pad, mag, rad, under } */ ],
   slider: [ /* { sel, items, kind } */ ],
-  refract: [ /* { sel, bezel, height, thick } */ ],
+  refract: [ /* { sel, bezel, depth, disp, scatter }：边宽、最外缘位移（缺省 0.45 × 边宽）、色散（缺省 0.08）、散射（缺省 0.05） */ ],
   hdr: [ /* { sel, spots: 'top bottom' } */ ],
   tips: '.my-toolbar [title]', // 哪些 title 换成玻璃提示（整串替换）
   glow: '.lg-btn, .my-button'  // 哪些元素写指尖光的 --mx / --my（整串替换）
@@ -151,7 +151,7 @@ window.LiquidGlassConfig = {
 ## 6. 脚本接口与事件
 
 ```js
-LiquidGlass.version      // '1.0.0'
+LiquidGlass.version      // '1.1.0'
 LiquidGlass.mode()       // 用户选的档：'auto' | 'full' | 'lite' | 'off'
 LiquidGlass.tier()       // 实际材质档：'l0' | 'l1' | 'l2' | 'l3'
 LiquidGlass.setMode('lite', true)   // 换档（'auto' 回到自动）；第二个参数 true 时弹一句提示
@@ -204,6 +204,20 @@ document.addEventListener('lg:modechange', function (e) {
 
 选中只改 `aria-pressed`，滑块自己跟过去。自己的结构用 `data-lg-slider=".my-tab" data-lg-kind="seg"`，
 并在 CSS 里写 `[data-lg-slider-on] .my-tab[aria-selected="true"] { background: transparent; }`（有滑块时选中项自己不画底）。
+
+**按住浮起、拖**（iOS 26 标签栏那样，kind 为 `seg` 的滑块都有）：
+
+- 按住选中项，滑块浮起成一块清玻璃透镜，盖在字上面、边上折射底下的字（Chrome / Edge 的「完整」档；别的浏览器上滑块放大一点）。
+- 按住横向拖：透镜跟着手指走，最近的那一项标上 `data-lg-near`（样式表让它先变成选中的样子）；松手落到最近一项，
+  快速一甩往甩的方向最多再走一格；拖过两端整条像橡皮筋被拉长。
+- **松手后脚本替用户点一下落到的那一项**（`element.click()`），页面的点击处理照常运行、照常改 `aria-pressed`——
+  所以页面的点击处理要能处理 `click()`（绑在按钮上或委托在容器上都行；别只听 `pointerup` / `mousedown`）。
+  页面不接受这次选中，滑块就回到真正选中的那一项。浏览器在拖完后自己补的那一下 click 会被吞掉。
+- 拖动中容器上有 `data-lg-drag`；拖过两端时脚本往容器上写 `transform`（拉长、弹回），弹完清掉。容器自己的 `transform` 会在这几百毫秒里被盖住。
+- 按钮里只有文字时，脚本把字写进 `data-lg-label`，样式表按粗体留宽度（选中变粗不挤动旁边的项）；按钮里有图标等元素时不动它的排版。
+- 容器挂在一个带 `filter` / `backdrop-filter` / `mask` 的祖先里时不出透镜（隔着背景根会画成一块暗方块，见 pitfalls.md #28）；
+  玻璃面板（`.lg-glass`）里没问题——它的毛玻璃画在伪元素上。
+- 窄屏上要是还会折成多行，就不能横着拖了（只能点）。
 
 ### 7.4 三档开关
 
@@ -270,16 +284,18 @@ document.addEventListener('lg:modechange', function (e) {
 
 - 脚本挂在 `document` 上监听事件、用 `MutationObserver` 发现变化，**不需要**在组件里初始化，也不需要在路由切换后调用什么。
   放在 `index.html` 里加载一次即可（或在应用入口 `import './liquid-glass.js'`，它会自己挂到 `window`）。
-- 它往容器末尾追加的元素（`.lg-lens`、`.lg-thumb`、`.lg-hdr`）是框架不认识的节点。React / Vue 只增删自己的节点，
+- 它往容器末尾追加的元素（`.lg-lens`、`.lg-thumb`、`.lg-lift`、`.lg-hdr`）是框架不认识的节点。React / Vue 只增删自己的节点，
   追加在末尾的外来节点不影响对比；容器整个被卸载时它们跟着消失，脚本下一帧发现后自己清理。
 - 选中状态用 `aria-*` 属性表达（第 4 节），不要只靠 `className` 切换——那样透镜认不出「选中」形态（滑块也找不到选中项）。
 - 服务端渲染：`<head>` 那段不闪脚本放进文档模板；`data-lg-*` 由脚本在客户端写，服务端不用管。
 - 不要让框架管 `<html>` 上的 `data-lg-mode` / `data-lg-tier` / `data-lg-lens` / `data-lg-js`。
+- 分段开关拖完是「替用户点一下」：受控组件（React 的 `onClick`、Vue 的 `@click`）照常收到点击，值由组件自己改，不需要额外接线。
 
 ## 10. 内容安全策略（CSP）、离线内网、老浏览器
 
 - **CSP**：`<head>` 的不闪脚本是内联的，需要 nonce / hash 或者挪进一个外部小文件；
-  折射贴图和 HDR 高光是 `data:` 图片，`img-src` 要允许 `data:`。脚本写样式用的是 CSSOM（`el.style.x = …`），不受 `style-src` 限制。
+  折射贴图（九宫格，每种圆角 × 边宽画一次）和 HDR 高光是 `data:` 图片，`img-src` 要允许 `data:`。
+  不许 `data:` 的话，用 `scripts/displacement_map.py --svg` 给尺寸固定的元素预先生成一段滤镜（贴图换成你托管的 PNG 文件也行）。脚本写样式用的是 CSSOM（`el.style.x = …`），不受 `style-src` 限制。
 - **离线内网**：全部是本地文件，不走 CDN、不加载网络字体，断网照样工作。
 - **老浏览器**：不支持 CSS 变量或 `closest` 的（IE11）脚本直接不做事；样式表里 `@media screen\0` 一段给出实色兜底；
   三档开关自动隐藏。脚本只用 ES5，老一点的浏览器也不会因为语法报错而整个不执行。
@@ -292,6 +308,7 @@ document.addEventListener('lg:modechange', function (e) {
    自动找的悬停项不合适时用 `--hover '选择器'` 指定。**三档要肉眼分得出来**。
 3. 设备像素比 1 和 2 各看一眼：1 上看锯齿与细线，2 上看高光。
 4. 交互：菜单上下快速划过（透镜不闪、字不被划）、从第一项点到最后一项（滑块流过去、不拖成长条）、
+   分段开关按住（浮起成透镜）、拖过去松手（换了选中、不会跳回原处）、拖过两端（像橡皮筋、松手弹回）、
    打开弹出菜单与命令面板（弹出不跳亮）、方向键走命令面板（光标跟着走）、折叠侧栏（滑块直接到位、图标上有玻璃提示）。
 5. 系统设置里打开「减少动态效果」「减少透明度」「增强对比度」各看一次。
 6. 无头浏览器截图前先把档位设成 `full`：无头 Chromium 是软件渲染，自动档会先不折射。
