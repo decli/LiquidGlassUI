@@ -311,7 +311,7 @@
    * 中间不放（透明 = 用原图）。尺寸变了只改这八块的 x / y / width / height，不重画贴图——
    * 拖窗口、透镜跟着项宽变的时候，折射都不用撤。
    */
-  var K = 0.45, TILE_PX = 2;
+  var K = 0.45, TILE_PX = 2, PASSES = 2;   // PASSES：位移分几段走（见 newFilter）
   var tileSets = {}, tileCount = 0;
   var PARTS = ['t', 'b', 'l', 'r', 'tl', 'tr', 'bl', 'br'];
   // 每块是不是在右边 / 下边（是的话坐标镜像过去按左上角算，法向再翻回来）
@@ -414,7 +414,7 @@
   /**
    * 一块玻璃的滤镜。disp > 0 时红绿蓝三路分开位移（色散），否则一路。
    *   位移图：透明的 128 底 + 九宫格八块（贴图没加载出来时那一块是透明的，m = 0，用原图——绝不会整片错位）
-   *   → 位移（放大；色散按 2m 叠上）→ 按 m^1.6 叠一层模糊 → 按 m 叠一层乳白
+   *   → 位移（放大，分两段各走一半；色散按 2m 叠上）→ 按 m^1.6 叠一层模糊 → 按 m 叠一层乳白
    *   → 只在位移超过 1/4 像素的地方用（m × max(12, 4 × 最外缘位移) 截到 1）→ 按形状裁 → 垫在原图上面
    * color-interpolation-filters 必须是 sRGB（缺省的线性 RGB 会把 128 算成 55 左右，整片往一边偏）；
    * 滤镜区域用缺省值（写 userSpaceOnUse 加 x/y 坐标原点会跑掉）。
@@ -440,16 +440,28 @@
       ins.push('p' + PARTS[i]);
     }
     merge('map', ins);
+    // 位移分两段走（每段一半）：Chrome 的 Skia Graphite 在 Mac（Metal）上，单个 feDisplacementMap 的 scale 一大
+    // （实测 24.6 坏、12.3 好），透镜里离边约 20px 处就出一道硬接缝、里外的字错开——拆成两段各走一半就没有（pitfalls 45）。
+    // 两段用同一张位移图，第二段按第一段的输出再取样，合起来约等于一段满量（最外缘略少两成）
+    function chain(result) {
+      var src = 'SourceGraphic', pair = [], q;
+      for (q = 0; q < PASSES; q++) {
+        var res = q === PASSES - 1 ? result : result + '_' + q;
+        pair.push(fe('feDisplacementMap', { 'in': src, in2: 'map', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G', result: res }));
+        src = res;
+      }
+      return pair;
+    }
     if (disp) {
       for (i = 0; i < 3; i++) {
         var ch = 'RGB'.charAt(i);
-        F.dm.push(fe('feDisplacementMap', { 'in': 'SourceGraphic', in2: 'map', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G', result: 'd' + ch }));
+        F.dm.push(chain('d' + ch));
         fe('feColorMatrix', { 'in': 'd' + ch, type: 'matrix', values: ONLY[ch], result: 'c' + ch });
       }
       fe('feComposite', { 'in': 'cR', in2: 'cG', operator: 'arithmetic', k1: '0', k2: '1', k3: '1', k4: '0', result: 'rg' });
       fe('feComposite', { 'in': 'rg', in2: 'cB', operator: 'arithmetic', k1: '0', k2: '1', k3: '1', k4: '0', result: 'rgb' });
     } else {
-      F.dm.push(fe('feDisplacementMap', { 'in': 'SourceGraphic', in2: 'map', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G', result: 'sharp' }));
+      F.dm.push(chain('sharp'));
     }
     fe('feColorMatrix', { 'in': 'map', type: 'matrix', values: '0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0', result: 'm' });
     if (disp) {
@@ -507,13 +519,14 @@
       im.setAttribute('x', String(g[0])); im.setAttribute('y', String(g[1]));
       im.setAttribute('width', String(g[2])); im.setAttribute('height', String(g[3]));
     }
-    // feDisplacementMap 取 (C − 0.5) × scale，C 在 0–1 之间，所以 scale = 2 × 最外缘位移。红多折一点、蓝少折一点
+    // feDisplacementMap 取 (C − 0.5) × scale，C 在 0–1 之间，所以 scale = 2 × 最外缘位移，再平分到几段上。红多折一点、蓝少折一点
     var s = 2 * depth, d = F.disp || 0;
+    function setScale(pair, total) { for (var q = 0; q < pair.length; q++) { pair[q].setAttribute('scale', (total / pair.length).toFixed(2)); } }
     if (F.dm.length === 3) {
-      F.dm[0].setAttribute('scale', (s * (1 + d)).toFixed(2));
-      F.dm[1].setAttribute('scale', s.toFixed(2));
-      F.dm[2].setAttribute('scale', (s * (1 - d)).toFixed(2));
-    } else { F.dm[0].setAttribute('scale', s.toFixed(2)); }
+      setScale(F.dm[0], s * (1 + d));
+      setScale(F.dm[1], s);
+      setScale(F.dm[2], s * (1 - d));
+    } else { setScale(F.dm[0], s); }
     F.soft.setAttribute('stdDeviation', Math.max(0.5, blur).toFixed(2));
     F.veil.setAttribute('slope', String(scat));
     // 位移不到 1/4 像素就用原图（中间一个像素都不重采样）。固定 ×12 时，深的透镜在位移已近 1px 的地方还在
