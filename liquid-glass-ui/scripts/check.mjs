@@ -144,13 +144,21 @@ for (const p of htmlPaths) {
     [...new Set([...inPage, ...inPageJs])].filter(c => !classesInCss.has(c) && !pageCss.has(c) && c !== 'lg-toast--').map(c => `.${c}`));
 }
 
-// 位移曲线 D(s) = K·b·(1 − s/b)² 的常数：脚本与离线生成器各写一份，改了一边忘了另一边，静态滤镜就和运行时对不上
+// 位移曲线 D(s) = depth·(1 − s/b)² 的常数（面板 K、透镜 LENS_K、分几段 PASSES）：脚本与离线生成器各写一份，
+// 改了一边忘了另一边，静态滤镜就和运行时对不上
 if (!argv.length) {
   const py = readFileSync(resolve(here, 'displacement_map.py'), 'utf8');
-  const kj = /\bvar K = ([\d.]+)/.exec(js), kp = /^K = ([\d.]+)/m.exec(py);
-  check('折射的位移曲线常数与 displacement_map.py 一致',
-    !kj || !kp ? ['找不到 K（liquid-glass.js 里的 var K = …，或 displacement_map.py 里的 K = …）']
-      : kj[1] !== kp[1] ? [`liquid-glass.js 是 ${kj[1]}，displacement_map.py 是 ${kp[1]}`] : []);
+  const pairs = [['K', /\bvar K = ([\d.]+)/, /^K = ([\d.]+)/m], ['LENS_K', /\bLENS_K = ([\d.]+)/, /^LENS_K = ([\d.]+)/m], ['PASSES', /\bPASSES = (\d+)/, /^PASSES = (\d+)/m]];
+  check('折射的位移曲线常数（K、LENS_K、PASSES）与 displacement_map.py 一致', pairs.flatMap(([name, rj, rp]) => {
+    const a = rj.exec(js), b = rp.exec(py);
+    return !a || !b ? [`找不到 ${name}（liquid-glass.js 里的 ${name} = …，或 displacement_map.py 里的 ${name} = …）`]
+      : a[1] !== b[1] ? [`${name}：liquid-glass.js 是 ${a[1]}，displacement_map.py 是 ${b[1]}`] : [];
+  }));
+  // 滤镜链里不许再有「按位移大小决定用不用折射结果」的门控、按 m 加权的模糊层和乳白：Mac 上 Chrome 的 Skia Graphite
+  // 把那道门控画成透镜里离边约 20px 的一圈硬接缝（pitfalls.md #45）；模糊和乳白真机上并排比过没有更好看。
+  // 位移结果只按形状裁（in2="map"）、垫在原图上
+  const gate = [/result: 'rw'/, /result: 'bw'/, /result: 'vw'/, /feGaussianBlur/, /lg-scatter/].filter(r => r.test(js)).map(r => String(r));
+  check('折射滤镜链里没有门控、模糊层、乳白（Graphite 的接缝，pitfalls #45）', gate.map(g => `liquid-glass.js 里还有 ${g}`));
 }
 
 // 版本号写在好几处：脚本文件头、脚本里的 version（真的那一份和替身那一份）、样式表文件头、仓库根的 package.json。

@@ -27,18 +27,18 @@ export interface SliderPreset {
   items: string;
   kind: 'seg' | 'nav' | 'cursor';
 }
-/** 折射预设：玻璃边的放大、模糊、散射 */
+/** 折射预设：玻璃边的放大（带一点色散） */
 export interface RefractPreset {
   sel: string;
   /** 边宽（px） */
   bezel?: number;
-  /** 最外缘位移（px），缺省 0.45 × bezel */
+  /** 最外缘位移（px），缺省 0.45 × bezel（lens 时 0.345 × bezel） */
   depth?: number;
   /** 色散，缺省 0.08 */
   disp?: number;
-  /** 边上乳白的浓度，缺省 0.05 */
-  scatter?: number;
-  /** 剖面：2 = 玻璃板（缺省，边上弯、正中平）；3 = 凸透镜那种三次剖面（配合 bezel = 短边 / 2，整块连续地弯） */
+  /** true：透镜——边宽到中线（配合 bezel = 短边 / 2），整块连续地弯；缺省是玻璃板（边上弯、正中平） */
+  lens?: boolean;
+  /** 剖面指数，缺省 2（平方）；3 是三次剖面（中线附近更平），1.2 版的透镜用过 */
   power?: 2 | 3;
 }
 /** HDR 高光预设 */

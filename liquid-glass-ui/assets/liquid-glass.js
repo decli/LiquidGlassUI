@@ -1,5 +1,5 @@
 /*!
- * Liquid Glass UI —— 交互层 v1.2.1
+ * Liquid Glass UI —— 交互层 v1.3.0
  *
  * 只管「看着像玻璃、摸着像水」，不碰业务：不发请求、不改表单、不改页面元素的 class。
  * 删掉这个 <script>，页面照样能用——liquid-glass.css 里有不带脚本的退路。
@@ -8,7 +8,7 @@
  * 做的八件事：
  *   1 分档：用户选的三档（完整 / 精简 / 关闭，没选过是「自动」）写在 <html data-lg-mode>，
  *     材质档写在 <html data-lg-tier>：l0 实色 / l1 模糊 / l2 模糊 + 折射 / l3 再加 HDR 高光。
- *   2 折射：照 iOS 26 的玻璃边——边上放大、模糊、散射（加一点色散），正中一个像素都不动。
+ *   2 折射：照 iOS 26 的玻璃边——边上放大（加一点色散），正中一个像素都不动。
  *     位移贴图切成九宫格，尺寸变了只挪不重画；挂成 SVG 滤镜交给 backdrop-filter。只有 Chromium 认 backdrop-filter 里的 url()。
  *   3 透镜：鼠标经过 / 键盘聚焦时，一颗清玻璃按弹簧物理流到那一项下面；经过的项微微放大、跟手。
  *   4 液态滑块：选中项底下那块，前沿先到、后沿后到，中途被拉长、落定回弹。
@@ -54,7 +54,7 @@
    */
   function inert() {
     var self = {
-      version: '1.2.1', supported: false,
+      version: '1.3.0', supported: false,
       init: function () { return self; }, mode: function () { return 'off'; }, tier: function () { return 'l0'; },
       setMode: function () {}, refresh: function () {}, describe: function () { return ''; }, notify: function () {}
     };
@@ -130,7 +130,7 @@
    *   rad   透镜圆角；不写就照那一项自己的圆角
    *   under 表格一类整行：垫一块亮板，指尖光跟着指针走；不放大、不折射、不跟手位移，按下往里收一点（不鼓出去）
    * 折射（refract）：
-   *   bezel 玻璃边宽（px）；depth 最外缘位移（px，缺省 0.45 × bezel）；disp 色散（缺省 0.08）；scatter 边上乳白的浓度（缺省 0.05）
+   *   bezel 玻璃边宽（px）；depth 最外缘位移（px，缺省 0.45 × bezel）；disp 色散（缺省 0.08）；lens 边宽到中线的透镜（位移缺省 0.345 × bezel）
    * 滑块（slider）kind 为 seg 的（分段开关）还能按住拖：按住选中项它浮起成一块会折射的透镜，见 §5.5。
    */
   var PRESETS = {
@@ -298,20 +298,21 @@
    * 照 iOS 26 的玻璃边：**放大 + 模糊 + 散射**（外加一点色散），正中一个像素都不重采样。
    *
    * 几何：圆角矩形，离边 b（边宽）以内是斜面。斜面**往里取样、越靠边位移越大**：
-   *   D(s) = K·b·(1 − s/b)²，K = 0.45，s 是离边的距离
-   * 最外缘 D′ = −0.9：边上那一圈被拉开约十倍（放大），往里平滑落回原样；取样位置 s + D(s) 处处单调
-   * （处处 D′ > −1），不折叠——同一段内容不会被画两遍，边上也不会出现镜像。
+   *   D(s) = depth·(1 − s/b)²，s 是离边的距离；depth = K·b（面板，K = 0.45）或 LENS_K·b（透镜，0.345）
+   * 面板：最外缘 D′ = −0.9，边上那一圈被拉开约十倍（放大），往里平滑落回原样；透镜：D′ = −0.69，放大约三倍。
+   * 取样位置 s + D(s) 处处单调（处处 D′ > −1），不折叠——同一段内容不会被画两遍，边上也不会出现镜像。
    * （上一版按斯涅尔定律 + 凸超椭圆算：位移全挤在最外两三个像素里，而且在那儿折叠了，边上的字被画两遍。）
    *
    * 位移图四个通道：R / G = 往哪边取样（128 = 不动），B = 位移大小 m = (1 − s/b)²（0 中间、1 最外缘），A = 形状。
-   * 滤镜拿 m 当权重：红绿蓝三路按略不同的强度位移（色散）；越靠边叠越多的模糊（m^1.6）和一层很淡的乳白（散射）；
-   * m 太小的地方直接用原图——中间一个像素都不重采样。
+   * 滤镜拿 m 当权重：红绿蓝三路按略不同的强度位移（色散），三路分开的那份按 2m 只叠在边上。
+   * 1.3 起链里没有别的了：按 m 加权的模糊层、乳白、「位移太小就用原图」的门控都去掉了——Mac 上的 Chrome（Skia Graphite）
+   * 把那道门控画成透镜里一圈硬接缝（pitfalls 45），模糊和乳白在真机上并排比过，没有更好看。
    *
    * 位移图按九宫格切：四个角（c × c，c = max(圆角, 边宽)）、四条边（沿边方向处处一样，存一条 2 像素宽的图拉伸），
    * 中间不放（透明 = 用原图）。尺寸变了只改这八块的 x / y / width / height，不重画贴图——
    * 拖窗口、透镜跟着项宽变的时候，折射都不用撤。
    */
-  var K = 0.45, TILE_PX = 2, PASSES = 2;   // PASSES：位移分几段走（见 newFilter）
+  var K = 0.45, LENS_K = 0.345, TILE_PX = 2, PASSES = 2;   // LENS_K：边宽到中线的透镜；PASSES：位移分几段走（见 newFilter）
   var tileSets = {}, tileCount = 0;
   var PARTS = ['t', 'b', 'l', 'r', 'tl', 'tr', 'bl', 'br'];
   // 每块是不是在右边 / 下边（是的话坐标镜像过去按左上角算，法向再翻回来）
@@ -331,8 +332,8 @@
   }
   /**
    * 一个像素：离边 s、朝外的法向 (nx, ny)、边宽 b、覆盖率 cov、剖面指数 pw。往里取样 = 沿法向的反方向。
-   * 位移大小 m = (1 − s/b)^pw：pw = 2 是默认的玻璃板（边上弯、正中平）；pw = 3 是凸透镜（data-lg-refract="lens"，
-   * 斜面一直到中线）——放大率连同它的变化率都从中线平滑地长出来，看不出「外面一圈在弯、里面一块是平的」
+   * 位移大小 m = (1 − s/b)^pw：pw = 2 是平方剖面（缺省；透镜把边宽放到中线，整块连续地弯）；pw = 3 是三次剖面
+   * （preset 里写 power: 3 才用：中线附近更平，1.2 版的透镜用过，真机并排比过之后换回了平方）
    */
   function texel(px, i, s, nx, ny, b, cov, pw) {
     if (s >= b) { px[i] = 128; px[i + 1] = 128; px[i + 2] = 0; }
@@ -414,16 +415,15 @@
   /**
    * 一块玻璃的滤镜。disp > 0 时红绿蓝三路分开位移（色散），否则一路。
    *   位移图：透明的 128 底 + 九宫格八块（贴图没加载出来时那一块是透明的，m = 0，用原图——绝不会整片错位）
-   *   → 位移（放大，分两段各走一半；色散按 2m 叠上）→ 按 m^1.6 叠一层模糊 → 按 m 叠一层乳白
-   *   → 只在位移超过 1/4 像素的地方用（m × max(12, 4 × 最外缘位移) 截到 1）→ 按形状裁 → 垫在原图上面
+   *   → 位移（放大，分两段各走一半；色散按 2m 叠上）→ 按形状裁 → 垫在原图上面
+   * 1.2 版里还有按 m^1.6 叠的模糊层、按 m 叠的乳白、「位移不到 1/4 像素就用原图」的门控，1.3 起都去掉了（见 setGeom 上面的说明）。
    * color-interpolation-filters 必须是 sRGB（缺省的线性 RGB 会把 128 算成 55 左右，整片往一边偏）；
    * 滤镜区域用缺省值（写 userSpaceOnUse 加 x/y 坐标原点会跑掉）。
-   * 乳白的颜色走令牌 --lg-scatter：深色底上同样的白要淡一半，不然边上一圈发灰。
    */
   function newFilter(disp) {
     var id = 'lgf-' + (++filterSeq), i;
     var f = svgEl('filter', { id: id, 'color-interpolation-filters': 'sRGB' });
-    var F = { id: id, node: f, disp: disp, parts: {}, dm: [], soft: null, veil: null, rim: null, sig: '' };
+    var F = { id: id, node: f, disp: disp, parts: {}, dm: [], sig: '' };
     function fe(name, attrs) { return f.appendChild(svgEl(name, attrs)); }
     function merge(result, ins) {
       var m = fe('feMerge', result ? { result: result } : {});
@@ -440,9 +440,8 @@
       ins.push('p' + PARTS[i]);
     }
     merge('map', ins);
-    // 位移分两段走（每段一半）：Chrome 的 Skia Graphite 在 Mac（Metal）上，单个 feDisplacementMap 的 scale 一大
-    // （实测 24.6 坏、12.3 好），透镜里离边约 20px 处就出一道硬接缝、里外的字错开——拆成两段各走一半就没有（pitfalls 45）。
-    // 两段用同一张位移图，第二段按第一段的输出再取样，合起来约等于一段满量（最外缘略少两成）
+    // 位移分两段走（每段一半）：两段用同一张位移图，第二段按第一段的输出再取样，合起来约等于一段满量（最外缘略少两成）。
+    // 单个 feDisplacementMap 的 scale 小一半，Mac 上 Chrome 的 Skia Graphite 画起来更稳（pitfalls 45）
     function chain(result) {
       var src = 'SourceGraphic', pair = [], q;
       for (q = 0; q < PASSES; q++) {
@@ -463,26 +462,18 @@
     } else {
       F.dm.push(chain('sharp'));
     }
-    fe('feColorMatrix', { 'in': 'map', type: 'matrix', values: '0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0', result: 'm' });
     if (disp) {
       // 色散只在边上：三路分开的那份按 2m（截到 1）叠在绿路那份（三路同一位移）上面。里面位移不大时三路
       // 各自取整到不同像素，字和图标的边会泛红泛青；透镜剖面一直伸到中线时这层彩边会铺满整片。
+      fe('feColorMatrix', { 'in': 'map', type: 'matrix', values: '0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0', result: 'm' });
       alpha('m', 'dw', { type: 'linear', slope: '2', intercept: '0' });
       fe('feComposite', { 'in': 'rgb', in2: 'dw', operator: 'in', result: 'rgbIn' });
       merge('sharp', ['dG', 'rgbIn']);
     }
-    F.soft = fe('feGaussianBlur', { 'in': 'sharp', stdDeviation: '0.5', result: 'soft' });
-    alpha('m', 'bw', { type: 'gamma', amplitude: '1', exponent: '1.6', offset: '0' });
-    fe('feComposite', { 'in': 'soft', in2: 'bw', operator: 'in', result: 'softIn' });
-    merge('lensed', ['sharp', 'softIn']);
-    var white = fe('feFlood', { 'flood-color': '#ffffff', result: 'white' });
-    white.style.setProperty('flood-color', 'var(--lg-scatter, #ffffff)');
-    F.veil = alpha('m', 'vw', { type: 'linear', slope: '0.05', intercept: '0' });
-    fe('feComposite', { 'in': 'white', in2: 'vw', operator: 'in', result: 'veil' });
-    merge('glowed', ['lensed', 'veil']);
-    F.rim = alpha('m', 'rw', { type: 'linear', slope: '12', intercept: '0' });
-    fe('feComposite', { 'in': 'glowed', in2: 'rw', operator: 'in', result: 'rim' });
-    fe('feComposite', { 'in': 'rim', in2: 'map', operator: 'in', result: 'shaped' });
+    // 折射结果整块按形状裁、垫在原图上面。位移结果和原图之间不再有按 m 加权的门控（「位移不到 1/4 像素就用原图」）：
+    // Mac 上 Chrome 的 Skia Graphite 会把那道门画成透镜里离边约 20px 的一圈硬接缝（pitfalls 45）。
+    // 正中 m = 0 的地方位移是 0，最近邻取样本来就是原图，不需要门控
+    fe('feComposite', { 'in': 'sharp', in2: 'map', operator: 'in', result: 'shaped' });
     merge('', ['SourceGraphic', 'shaped']);
     svgDefs().appendChild(f);
     return F;
@@ -490,7 +481,7 @@
   function dropFilter(F) { if (F && F.node.parentNode) { F.node.parentNode.removeChild(F.node); } }
 
   /**
-   * 按元素的布局尺寸摆好九宫格、定好强度（look：bezel 边宽、depth 最外缘位移、disp 色散、blur 最外缘模糊、scatter 散射）。
+   * 按元素的布局尺寸摆好九宫格、定好强度（look：bezel 边宽、depth 最外缘位移、lens 边宽到中线的透镜、power 剖面指数、disp 色散）。
    * 和上次一样就什么都不做；只是尺寸变了就只挪这八块。
    */
   function setGeom(F, w, h, r, look) {
@@ -498,9 +489,11 @@
     var lim = Math.min(w, h) / 2;
     r = clamp(r, 0, lim);
     var b = clamp(look.bezel, 2, Math.max(2, lim - 1)), c = Math.max(r, b), pw = look.power === 3 ? 3 : 2;
-    // 缺省的最外缘位移 (2K/pw)·b：最外缘 D′ = −2K = −0.9，任何剖面都放大约十倍、不折叠
-    var depth = look.depth || b * 2 * K / pw, blur = look.blur || 0.5, scat = look.scatter == null ? 0.05 : look.scatter;
-    var sig = w + 'x' + h + '|' + r.toFixed(2) + '|' + b.toFixed(2) + '|' + depth.toFixed(2) + '|' + blur.toFixed(2) + '|' + scat + '|' + pw;
+    // 缺省的最外缘位移：面板 K·b（最外缘 D′ = −0.9，放大约十倍）；透镜 LENS_K·b（D′ = −0.69，放大约三倍——
+    // 边宽到了中线，整块都在弯，再深字就晃；这个数是在 Mac 上拖着演示玻璃并排比出来的）；三次剖面 (2K/3)·b
+    // （D′ = −0.9；按 LENS_K 的话最外缘 1 + D′ = 1 − 3 × 0.345 < 0，折叠）。三种都处处不折叠
+    var depth = look.depth || b * (pw === 3 ? 2 * K / 3 : look.lens ? LENS_K : K);
+    var sig = w + 'x' + h + '|' + r.toFixed(2) + '|' + b.toFixed(2) + '|' + depth.toFixed(2) + '|' + pw;
     if (sig === F.sig) { return; }
     F.sig = sig;
     var set = tileSet(c, r, b, pw), mid = (w - 2 * c + 2).toFixed(2), tall = (h - 2 * c + 2).toFixed(2), k;
@@ -527,11 +520,6 @@
       setScale(F.dm[1], s);
       setScale(F.dm[2], s * (1 - d));
     } else { setScale(F.dm[0], s); }
-    F.soft.setAttribute('stdDeviation', Math.max(0.5, blur).toFixed(2));
-    F.veil.setAttribute('slope', String(scat));
-    // 位移不到 1/4 像素就用原图（中间一个像素都不重采样）。固定 ×12 时，深的透镜在位移已近 1px 的地方还在
-    // 把原图和折射结果对半掺，掺到哪儿算哪儿——那一圈是看得出来的。
-    F.rim.setAttribute('slope', Math.max(12, 4 * depth).toFixed(1));
   }
 
   /**
@@ -553,24 +541,22 @@
   /**
    * 一块玻璃的折射强度。预设里写的直接用；data-lg-refract="边宽 [最外缘位移]" 照写的用
    * （三个数是老写法「边宽 隆起 厚度」，第三个数当位移用）；不给值时按尺寸取：边宽 = 短边 × 0.2，夹在 10–24px。
-   * 位移缺省 = 0.45 × 边宽。面板越大，边越宽、折得越多；小控件边窄，不然整颗都在弯、字看着晃。
+   * 位移缺省 = 0.45 × 边宽（透镜 0.345 × 边宽，setGeom 里按夹过的边宽算）。面板越大，边越宽、折得越多；小控件边窄，
+   * 不然整颗都在弯、字看着晃。
    */
   function refractParams(el, cfg, w, h) {
-    var b = cfg.bezel, d = cfg.depth, pw = cfg.power === 3 ? 3 : 2;
+    var b = cfg.bezel, d = cfg.depth, lens = !!cfg.lens;
     if (!b) {
       var raw = el.getAttribute('data-lg-refract') || '', v = raw.split(/[\s,]+/);
       if (/^\s*lens\b/i.test(raw)) {
-        // 凸透镜：斜面一直到中线（setGeom 夹到短边一半减 1）、三次剖面——整块连续地弯，没有平的内圈。给小块的玻璃用
-        b = Math.min(w, h) / 2; pw = 3; d = v.length >= 2 ? num(v[1], 0) : 0;
+        // 透镜：斜面一直到中线（setGeom 夹到短边一半减 1）——整块连续地弯，没有平的内圈。给小块的玻璃用
+        b = Math.min(w, h) / 2; lens = true; d = v.length >= 2 ? num(v[1], 0) : 0;
       } else if (v[0] !== '' && !isNaN(parseFloat(v[0]))) {
         b = num(v[0], 16);
         d = v.length >= 3 ? num(v[2], 0) : v.length === 2 ? num(v[1], 0) : 0;
       } else { b = clamp(Math.round(Math.min(w, h) * 0.2), 10, 24); }
     }
-    return {
-      bezel: b, depth: d || b * 2 * K / pw, power: pw, blur: Math.max(0.5, b * 0.06),
-      disp: cfg.disp == null ? 0.08 : cfg.disp, scatter: cfg.scatter == null ? 0.05 : cfg.scatter
-    };
+    return { bezel: b, depth: d || 0, lens: lens, power: cfg.power === 3 ? 3 : 2, disp: cfg.disp == null ? 0.08 : cfg.disp };
   }
 
   var refractNodes = [];
@@ -997,9 +983,9 @@
     if (!L.F) { L.F = newFilter(0.06); L.ref.style.setProperty('--lg-ref', 'url(#' + L.F.id + ')'); }
     var w = Math.round(L.pw != null ? L.pw : L.w), h = Math.round(L.ph != null ? L.ph : L.h);   // 画出来的尺寸（可能被关进滚动范围时收过）
     if (w < 8 || h < 8) { return; }
-    // 凸透镜剖面（斜面到中线、三次方）：会动的一小颗玻璃整块连续地弯，没有「外圈弯、内圈平」的接缝；字在正中，照样清楚
+    // 透镜剖面（斜面到中线）：会动的一小颗玻璃整块连续地弯，没有「外圈弯、内圈平」的接缝；字在正中，位移小，照样清楚
     var r = L.rad != null ? Math.min(L.rad, h / 2) : h / 2;
-    setGeom(L.F, w, h, r, { bezel: h / 2, power: 3, blur: Math.max(0.5, h * 0.02), disp: 0.06, scatter: 0.05 });
+    setGeom(L.F, w, h, r, { bezel: h / 2, lens: true, disp: 0.06 });
   }
 
   /** 透镜底下是不是指针（不是键盘）：整行的指尖光只在指针在的时候亮 */
@@ -1343,10 +1329,10 @@
     Z.el.style.width = L.w + 'px';
     Z.el.style.height = L.h + 'px';
     Z.el.style.transform = 'translate3d(' + L.x.toFixed(2) + 'px,' + L.y.toFixed(2) + 'px,0)';
-    // 透镜：凸透镜剖面——斜面一直到中线、三次方（data-lg-refract="lens" 同一条），整块连续地弯。
+    // 透镜：斜面一直到中线（data-lg-refract="lens" 同一条），整块连续地弯。
     // 以前斜面只占半高的六成、正中四成原样透出，停在两项之间时边上的字被拉开、中间一块不动，看着是两个椭圆套在一起。
-    // 最外缘只往里取 0.3 × 半高（约 10px），整条导航条自己的边（离透镜的边约 6px）采不到，不会被放大成一道彩边；色散比面板略重
-    setGeom(Z.F, L.w, L.h, L.h / 2, { bezel: L.h / 2, power: 3, blur: Math.max(0.5, L.h * 0.024), disp: 0.1, scatter: 0.06 });
+    // 最外缘往里取 0.345 × 半高（约 12px），整条导航条自己的边（离透镜的边约 6px）采不到，不会被放大成一道彩边；色散比面板略重
+    setGeom(Z.F, L.w, L.h, L.h / 2, { bezel: L.h / 2, lens: true, disp: 0.1 });
     Z.ref.style.opacity = clamp((up - 0.15) / 0.6, 0, 1).toFixed(3);
     // 边：从平胶囊的大小长到透镜的大小（浮起的回弹让它略大一点再收回），很快淡入
     var rx = w / L.w + (1 - w / L.w) * up, ry = h / L.h + (1 - h / L.h) * up;
@@ -1898,7 +1884,7 @@
   }
 
   var api = win.LiquidGlass = {
-    version: '1.2.1',
+    version: '1.3.0',
     /** true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身 */
     supported: true,
     /** 换配置（同 window.LiquidGlassConfig 的选项），返回 LiquidGlass 本身 */

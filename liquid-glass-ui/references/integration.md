@@ -57,7 +57,7 @@
 ### B. npm / 打包工具（Vite、webpack、Next.js、Nuxt……）
 
 ```bash
-npm i github:decli/LiquidGlassUI#v1.2.1     # 装某个发布版；仓库是私有的，本机的 git 要能 clone 它
+npm i github:decli/LiquidGlassUI#v1.3.0     # 装某个发布版；仓库是私有的，本机的 git 要能 clone 它
 ```
 
 ```js
@@ -137,7 +137,7 @@ LiquidGlass.init({ storageKey: 'myapp.glass' });   // 可选：要改配置才�
 | `data-lg-under` | 同上 | 整行形态（表格行一类）：垫亮板，指尖光跟着指针走；不放大、不折射、不跟手位移，按下往里收一点 |
 | `data-lg-slider="项的选择器"` | 多选一的容器 | 选中项底下一块液态滑块。不给值时项是 `.lg-item` |
 | `data-lg-kind="seg|nav|cursor"` | 同上 | 滑块长相：白玻璃 / 蓝色（危险项红色）/ 主色浅玻璃光标。`seg` 还能按住浮起、拖（第 7.3 节） |
-| `data-lg-refract` 或 `="边宽 [最外缘位移]"` 或 `="lens"` | 一块 `.lg-glass` | 打开折射（只在 l2 / l3 生效）：边上那一圈放大、模糊、泛一点乳白和彩边，正中原样。不给值按尺寸取（边宽 = 短边 × 0.2，夹在 10–24px；位移 = 0.45 × 边宽）。`lens`：**凸透镜**——斜面一直到中线、三次剖面，整块连续地弯，没有「外面一圈弯、里面一块平」；给一小块独立的玻璃（可拖的水滴、旋钮、放大镜）用，面板、菜单这种大块的照旧用默认。老写法「边宽 隆起 厚度」三个数照样认，第三个数当位移用 |
+| `data-lg-refract` 或 `="边宽 [最外缘位移]"` 或 `="lens"` | 一块 `.lg-glass` | 打开折射（只在 l2 / l3 生效）：边上那一圈放大、带一点彩边，正中原样。不给值按尺寸取（边宽 = 短边 × 0.2，夹在 10–24px；位移 = 0.45 × 边宽）。`lens`：**透镜**——斜面一直到中线（位移 0.345 × 边宽），整块连续地弯，没有「外面一圈弯、里面一块平」；给一小块独立的玻璃（可拖的水滴、旋钮、放大镜）用，面板、菜单这种大块的照旧用默认。老写法「边宽 隆起 厚度」三个数照样认，第三个数当位移用 |
 | `data-lg-hdr` 或 `="top bottom"` | 一块 `.lg-glass` | HDR 屏上上沿（和下沿）一道比白更亮的高光 |
 | `data-lg-tip` / `data-lg-tip="right"` | 元素或容器 | 把里面的 `title` 换成玻璃提示；`right` 表示出现在容器右边 |
 | `data-lg-glow` | 任意可点的元素 | 写 `--mx` / `--my`，配合自己的 `radial-gradient` 做指尖光 |
@@ -177,7 +177,7 @@ window.LiquidGlassConfig = {
   presets: true,               // false：不认组件类，只认 data 属性
   lens: [ /* 整组替换透镜预设：{ sel, items, pad, mag, rad, under } */ ],
   slider: [ /* { sel, items, kind } */ ],
-  refract: [ /* { sel, bezel, depth, disp, scatter, power }：边宽、最外缘位移（缺省 0.45 × 边宽；power 3 时 0.3 × 边宽）、色散（缺省 0.08）、散射（缺省 0.05）、剖面（2 玻璃板 / 3 凸透镜） */ ],
+  refract: [ /* { sel, bezel, depth, disp, lens, power }：边宽、最外缘位移（缺省 0.45 × 边宽；lens 时 0.345 × 边宽）、色散（缺省 0.08）、lens: true 边宽到中线的透镜、剖面指数（缺省 2；3 是三次剖面） */ ],
   hdr: [ /* { sel, spots: 'top bottom' } */ ],
   tips: '.my-toolbar [title]', // 哪些 title 换成玻璃提示（整串替换）
   glow: '.lg-btn, .my-button'  // 哪些元素写指尖光的 --mx / --my（整串替换）
@@ -188,7 +188,7 @@ window.LiquidGlassConfig = {
 ## 6. 脚本接口与事件
 
 ```js
-LiquidGlass.version      // '1.2.1'
+LiquidGlass.version      // '1.3.0'
 LiquidGlass.supported    // true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身（方法都在，什么都不做）
 LiquidGlass.init({ … })  // 换配置（第 5 节），返回 LiquidGlass 本身
 LiquidGlass.mode()       // 用户选的档：'auto' | 'full' | 'lite' | 'off'

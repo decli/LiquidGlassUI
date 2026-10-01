@@ -9,13 +9,13 @@
 |---|---|
 | ![深色](design/dark.png) | ![三档](design/modes.png) |
 
-| 玻璃导航条：按住「概览」往右拖，浮起的透镜把字和图标放大、弯折 | 折射：一小块玻璃整块是一个凸透镜（`data-lg-refract="lens"`）；大块面板边上弯、正中原样 |
+| 玻璃导航条：按住「概览」往右拖，浮起的透镜把字和图标放大、弯折 | 折射：一小块玻璃整块是一个透镜（`data-lg-refract="lens"`）；大块面板边上弯、正中原样 |
 |---|---|
 | ![玻璃导航条](design/tabbar-dark@2x.png) | ![折射](design/refraction@2x.png) |
 
 ## 有什么
 
-- **会折射的玻璃**：照 iOS 26 的玻璃边——边上那一圈把背后的内容**放大**、轻微**模糊**、泛一层很淡的乳白（**散射**）和一点彩边（**色散**），正中一个像素都不动。`backdrop-filter` 里挂一条 SVG 滤镜：位移曲线 `0.45·b·(1 − s/b)²` 往里取样、处处不折叠，贴图切成九宫格，尺寸变了只挪不重画。Chrome / Edge 上有，其他浏览器自动退成模糊。
+- **会折射的玻璃**：照 iOS 26 的玻璃边——边上那一圈把背后的内容**放大**，带一点彩边（**色散**），正中一个像素都不动。`backdrop-filter` 里挂一条 SVG 滤镜：位移曲线 `0.45·b·(1 − s/b)²`（透镜 `0.345·b`）往里取样、处处不折叠，分两段走，贴图切成九宫格，尺寸变了只挪不重画。链里没有门控、模糊层、乳白——Mac 上 Chrome 的 Skia Graphite 会把它们画成透镜里一圈接缝。Chrome / Edge 上有，其他浏览器自动退成模糊。
 - **按住浮起的分段开关与玻璃导航条**：像 iOS 26 的标签栏，按住任一项，滑块浮起成一块盖在字上面、会折射的清玻璃透镜，飞到手指下面；能拖，拖过两端像橡皮筋，甩一下整条形变再回弹；点别的项时浮着滑过去。另有浮在内容上面的玻璃导航条（`.lg-seg--glass`，图标 + 字）。
 - **流动的透镜**：鼠标经过、键盘聚焦时，一颗清玻璃按弹簧物理流到那一项底下，经过的项微微放大、跟手，按下像果冻。
 - **液态滑块**：选中项底下那一块前沿先到、后沿后到，中途被拉长、落定回弹。
@@ -49,7 +49,7 @@
 **npm / 打包工具**（Vite、webpack、Next.js、Nuxt……；服务端渲染时 import 也不会报错）：
 
 ```bash
-npm i github:decli/LiquidGlassUI#v1.2.1
+npm i github:decli/LiquidGlassUI#v1.3.0
 ```
 
 ```js
@@ -165,8 +165,9 @@ python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liqui
 ## English
 
 **Liquid Glass UI** is a dependency-free kit (one CSS file + one ES5 script) that brings Apple's Liquid Glass material to web
-apps: iOS 26-style edge refraction inside `backdrop-filter` (Chromium) — the rim magnifies, softly blurs, scatters and
-disperses what is behind it while the centre stays pixel-exact (a non-folding inward displacement curve on a nine-slice map) —
+apps: iOS 26-style edge refraction inside `backdrop-filter` (Chromium) — the rim magnifies and slightly
+disperses what is behind it while the centre stays pixel-exact (a non-folding inward displacement curve on a nine-slice map,
+no blur layer, veil or gate in the chain, so Chrome's Skia Graphite backend on macOS renders it without a seam) —
 fluid spring-driven hover lenses, liquid selection sliders, a tab-bar-style segmented control whose thumb lifts into a
 refracting lens you can drag (rubber-band ends, flick deformation), pointer-following glow, glass tooltips, HDR highlights,
 an iPadOS-style grouped sidebar, and a

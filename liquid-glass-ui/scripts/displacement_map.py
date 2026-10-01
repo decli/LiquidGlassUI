@@ -6,18 +6,19 @@
   2. 给尺寸固定的元素预先生成一段完整的 SVG 滤镜，贴进页面就能用，不跑脚本；
   3. 自检：python3 displacement_map.py --selftest
 
-模型（照 iOS 26 的玻璃边：放大 + 模糊 + 散射，正中原样）：
+模型（照 iOS 26 的玻璃边：放大，带一点色散，正中原样）：
   几何：圆角矩形，离边 b（边宽）以内是斜面。
-  位移：斜面「往里取样、越靠边位移越大」：D(s) = K·b·(1 − s/b)²，K = 0.45，s 是离边的距离。
-        最外缘 D′ = −0.9：边上那一圈被拉开约十倍（放大）；取样位置 s + D(s) 处处单调（D′ > −1），
-        不折叠——同一段内容不会被画两遍，边上不会出现镜像。
-  凸透镜（--lens，页面上写 data-lg-refract="lens"）：斜面一直到中线（b = 短边 / 2），剖面换成三次
-        D(s) = (2K/3)·b·(1 − s/b)³：最外缘同样 D′ = −0.9，但从中线起放大率连同它的变化率都是从 0 平滑长出来的——
-        整块是一个连续弯曲的凸透镜，看不出「外面一圈在弯、里面一块是平的」。一般剖面写成 m = (1 − s/b)^p、
-        最外缘位移 = (2K/p)·b，p = 2 是默认的玻璃板，p = 3 是凸透镜。
+  位移：斜面「往里取样、越靠边位移越大」：D(s) = depth·(1 − s/b)²，s 是离边的距离。
+        面板 depth = K·b（K = 0.45）：最外缘 D′ = −0.9，边上那一圈被拉开约十倍（放大）；
+        取样位置 s + D(s) 处处单调（D′ > −1），不折叠——同一段内容不会被画两遍，边上不会出现镜像。
+  透镜（--lens，页面上写 data-lg-refract="lens"）：斜面一直到中线（b = 短边 / 2），depth = LENS_K·b（0.345）：
+        最外缘 D′ = −0.69，放大约三倍——整块都在弯，再深字就晃；整块是一个连续弯曲的透镜，
+        看不出「外面一圈在弯、里面一块是平的」。剖面指数 p 缺省 2（平方）；--power 3 是三次剖面（1.2 版的透镜用过）。
   编码：R / G = 往哪边取样（128 = 不动；feDisplacementMap 取 (x + scale·(R − .5), y + scale·(G − .5))），
-        scale = 2 × 最外缘位移；B = 位移大小 m = (1 − s/b)²（0 中间、1 最外缘），滤镜拿它当模糊、散射、
-        「用不用折射结果」的权重；A = 形状（圆角外透明）。
+        scale = 2 × 最外缘位移；B = 位移大小 m = (1 − s/b)^p（0 中间、1 最外缘），滤镜拿它当色散的权重；
+        A = 形状（圆角外透明）。
+  滤镜链里没有按 m 加权的模糊层、乳白和「位移太小就用原图」的门控：Mac 上 Chrome 的 Skia Graphite 把那道门控画成透镜里
+  一圈硬接缝（pitfalls 45），模糊和乳白在真机上并排比过没有更好看。位移分两段各走一半（两个 feDisplacementMap 串起来）。
 
 上一版用斯涅尔定律 + 凸超椭圆剖面算位移：位移全挤在最外两三个像素里，而且在那儿 D′ < −1、贴图折叠了，
 边上的字被画两遍、还有一道镜像。--selftest 现在验的就是「取样位置单调」这一条。
@@ -28,7 +29,7 @@
 用法：
   python3 displacement_map.py --w 344 --h 300 --radius 20 --bezel 18 --out map.png
   python3 displacement_map.py --w 220 --h 84 --radius 42 --bezel 22 --svg --id glass-a > filter.svg
-  python3 displacement_map.py --w 220 --h 84 --lens --svg --id drop > filter.svg      # 整块凸透镜
+  python3 displacement_map.py --w 220 --h 84 --lens --svg --id drop > filter.svg      # 整块是一个透镜
 """
 import argparse
 import base64
@@ -37,8 +38,10 @@ import struct
 import sys
 import zlib
 
-K = 0.45          # 最外缘位移 = K × 边宽（与 liquid-glass.js 的 K 一致，scripts/check.mjs 会核对）
+K = 0.45          # 面板的最外缘位移 = K × 边宽（与 liquid-glass.js 的 K 一致，scripts/check.mjs 会核对）
+LENS_K = 0.345    # 透镜（边宽到中线）的最外缘位移 = LENS_K × 边宽（同上，与 liquid-glass.js 的 LENS_K 一致）
 TILE_PX = 2       # 运行时九宫格贴图的像素密度（每 CSS 像素几个贴图像素）
+PASSES = 2        # 位移分几段走（与 liquid-glass.js 的 PASSES 一致）
 
 
 def png_rgba8(w, h, pixels):
@@ -89,9 +92,10 @@ def arc_coverage(fx, fy, r, sub):
     return hits / 16
 
 
-def depth_of(b, p=2):
-    """缺省的最外缘位移：(2K/p)·b——最外缘 D′ = −p·(2K/p) = −2K = −0.9，任何剖面指数都放大约十倍、不折叠"""
-    return 2 * K / p * b
+def depth_of(b, lens=False, p=2):
+    """缺省的最外缘位移：面板 K·b（最外缘 D′ = −0.9，放大约十倍）；透镜 LENS_K·b（D′ = −0.69，放大约三倍）；
+    三次剖面 (2K/3)·b（D′ = −0.9；按 LENS_K 的话最外缘 1 + D′ < 0，折叠）。三种都处处不折叠"""
+    return (2 * K / 3 if p == 3 else LENS_K if lens else K) * b
 
 
 def full_map(w, h, r, b, p=2):
@@ -149,39 +153,39 @@ def tiles(c, r, b, density=TILE_PX, p=2):
     return out
 
 
-def svg_filter(fid, w, h, png, depth, disp=0.08, blur=None, scatter=0.05, bezel=16):
+def svg_filter(fid, w, h, png, depth, disp=0.08):
     """一段能直接贴进页面的滤镜（与 liquid-glass.js 的 newFilter 同一条链，只是位移图是一整张）。"""
     url = 'data:image/png;base64,' + base64.b64encode(png).decode('ascii')
     s = 2 * depth
-    blur = max(0.5, bezel * 0.06) if blur is None else blur
     one = lambda c: {'R': '1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0', 'G': '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0',
                      'B': '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'}[c]
+
+    def chain(result, total):
+        # 位移分 PASSES 段各走一份，后一段按前一段的输出再取样
+        src, out = 'SourceGraphic', ''
+        for q in range(PASSES):
+            res = result if q == PASSES - 1 else f'{result}_{q}'
+            out += (f'    <feDisplacementMap in="{src}" in2="map" scale="{total / PASSES:.2f}" xChannelSelector="R" '
+                    f'yChannelSelector="G" result="{res}"/>\n')
+            src = res
+        return out
     if disp:
-        lens = ''.join(
-            f'    <feDisplacementMap in="SourceGraphic" in2="map" scale="{s * f:.2f}" xChannelSelector="R" yChannelSelector="G" result="d{c}"/>\n'
-            f'    <feColorMatrix in="d{c}" type="matrix" values="{one(c)}" result="c{c}"/>\n'
-            for c, f in (('R', 1 + disp), ('G', 1), ('B', 1 - disp)))
+        lens = ''.join(chain(f'd{c}', s * f) + f'    <feColorMatrix in="d{c}" type="matrix" values="{one(c)}" result="c{c}"/>\n'
+                       for c, f in (('R', 1 + disp), ('G', 1), ('B', 1 - disp)))
         lens += ('    <feComposite in="cR" in2="cG" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="rg"/>\n'
-                 '    <feComposite in="rg" in2="cB" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="sharp"/>\n')
+                 '    <feComposite in="rg" in2="cB" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="rgb"/>\n'
+                 '    <feColorMatrix in="map" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0" result="m"/>\n'
+                 '    <feComponentTransfer in="m" result="dw"><feFuncA type="linear" slope="2" intercept="0"/></feComponentTransfer>\n'
+                 '    <feComposite in="rgb" in2="dw" operator="in" result="rgbIn"/>\n'
+                 '    <feMerge result="sharp"><feMergeNode in="dG"/><feMergeNode in="rgbIn"/></feMerge>\n')
     else:
-        lens = f'    <feDisplacementMap in="SourceGraphic" in2="map" scale="{s:.2f}" xChannelSelector="R" yChannelSelector="G" result="sharp"/>\n'
+        lens = chain('sharp', s)
     return (
         '<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">\n'
         f'  <filter id="{fid}" color-interpolation-filters="sRGB">\n'
         f'    <feImage x="0" y="0" width="{w}" height="{h}" preserveAspectRatio="none" result="map" href="{url}"/>\n'
         + lens +
-        '    <feColorMatrix in="map" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0" result="m"/>\n'
-        f'    <feGaussianBlur in="sharp" stdDeviation="{blur:.2f}" result="soft"/>\n'
-        '    <feComponentTransfer in="m" result="bw"><feFuncA type="gamma" amplitude="1" exponent="1.6" offset="0"/></feComponentTransfer>\n'
-        '    <feComposite in="soft" in2="bw" operator="in" result="softIn"/>\n'
-        '    <feMerge result="lensed"><feMergeNode in="sharp"/><feMergeNode in="softIn"/></feMerge>\n'
-        '    <feFlood flood-color="#ffffff" style="flood-color: var(--lg-scatter, #ffffff)" result="white"/>\n'
-        f'    <feComponentTransfer in="m" result="vw"><feFuncA type="linear" slope="{scatter}" intercept="0"/></feComponentTransfer>\n'
-        '    <feComposite in="white" in2="vw" operator="in" result="veil"/>\n'
-        '    <feMerge result="glowed"><feMergeNode in="lensed"/><feMergeNode in="veil"/></feMerge>\n'
-        '    <feComponentTransfer in="m" result="rw"><feFuncA type="linear" slope="12" intercept="0"/></feComponentTransfer>\n'
-        '    <feComposite in="glowed" in2="rw" operator="in" result="rim"/>\n'
-        '    <feComposite in="rim" in2="map" operator="in" result="shaped"/>\n'
+        '    <feComposite in="sharp" in2="map" operator="in" result="shaped"/>\n'
         '    <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="shaped"/></feMerge>\n'
         '  </filter>\n'
         '</svg>\n'
@@ -189,10 +193,10 @@ def svg_filter(fid, w, h, png, depth, disp=0.08, blur=None, scatter=0.05, bezel=
         f'     backdrop-filter: blur(14px) url(#{fid}) saturate(1.8); -->\n')
 
 
-def selftest_one(p, w, h, r, bez):
+def selftest_one(p, w, h, r, bez, lens=False):
     problems = []
     px, r, bez = full_map(w, h, r, bez, p)
-    depth = depth_of(bez, p)
+    depth = depth_of(bez, lens, p)
     scale = 2 * depth
     at = lambda x, y: px[(y * w + x) * 4:(y * w + x) * 4 + 4]
     disp_x = lambda x, y: (at(x, y)[0] / 255 - 0.5) * scale
@@ -215,11 +219,12 @@ def selftest_one(p, w, h, r, bez):
     if any(pos[i + 1] <= pos[i] for i in range(len(pos) - 1)):
         problems.append('取样位置没有从边缘往里单调变大：贴图折叠了（边上的内容会被画两遍）')
 
-    # 解析式：D(s) = (2K/p)·b·t^p，1 + D′(s) = 1 − 2K·t^(p−1)：处处 > 0，最外缘约 0.1（放大约十倍）；
-    # 斜面里头那一端（t → 0）放大率和它的变化率都要平滑地从 1 / 0 长出来（p = 2 时变化率是一个定值起步，p = 3 时从 0 起步）
-    dmin = min(1 - 2 * K * (1 - s_ / bez) ** (p - 1) for s_ in [i / 100 * bez for i in range(101)])
-    if not 0.05 < dmin < 0.2:
-        problems.append(f'最外缘的 1 + D′ 应当约为 0.1（放大约十倍、不折叠），实际 {dmin:.3f}')
+    # 解析式：D(s) = depth·t^p（t = 1 − s/b），1 + D′(s) = 1 − p·(depth/b)·t^(p−1)：处处 > 0 才不折叠。
+    # 面板（depth = K·b，p = 2）最外缘 1 − 2K = 0.1（放大约十倍）；透镜（depth = LENS_K·b，p = 2）最外缘 1 − 2·LENS_K = 0.31（约三倍）
+    dmin = min(1 - p * depth / bez * (1 - s_ / bez) ** (p - 1) for s_ in [i / 100 * bez for i in range(101)])
+    lo, hi = (0.25, 0.4) if lens and p == 2 else (0.05, 0.2)
+    if not lo < dmin < hi:
+        problems.append(f'最外缘的 1 + D′ 应当在 {lo}–{hi} 之间（{"透镜放大约三倍" if lens and p == 2 else "放大约十倍"}、不折叠），实际 {dmin:.3f}')
 
     for x in range(w):                                           # 左右对称
         if abs(disp_x(x, y) + disp_x(w - 1 - x, y)) > scale / 255 * 1.01:
@@ -259,13 +264,14 @@ def selftest_one(p, w, h, r, bez):
     png = png_rgba8(w, h, px)
     if not png.startswith(b'\x89PNG'):
         problems.append('PNG 不对')
-    print('剖面 p=%d：边宽 %.1f，最外缘位移 %.2fpx，scale %.2f，最外缘放大约 %.0f 倍' % (p, bez, depth, scale, 1 / dmin))
+    print('%s p=%d：边宽 %.1f，最外缘位移 %.2fpx，scale %.2f，最外缘放大约 %.1f 倍' % ('透镜' if lens else '面板', p, bez, depth, scale, 1 / dmin))
     return problems
 
 
 def selftest():
     problems = selftest_one(2, 120, 48, 24, 14)                  # 默认的玻璃板：边上弯、正中平
-    problems += ['凸透镜：' + x for x in selftest_one(3, 120, 48, 24, 24)]   # 凸透镜：斜面到中线（脚本里会夹到短边一半减 1）
+    problems += ['透镜：' + x for x in selftest_one(2, 120, 48, 24, 24, lens=True)]   # 透镜：斜面到中线（脚本里会夹到短边一半减 1）
+    problems += ['三次剖面：' + x for x in selftest_one(3, 120, 48, 24, 24, lens=True)]
     if problems:
         print('失败：' + '；'.join(problems))
         return 1
@@ -279,12 +285,13 @@ def main():
     ap.add_argument('--h', type=int, help='高（px）')
     ap.add_argument('--radius', type=float, default=None, help='圆角（px），缺省 = 高的一半（胶囊）')
     ap.add_argument('--bezel', type=float, default=None, help='玻璃边宽（px），缺省 = 短边 × 0.2，夹在 10–24')
-    ap.add_argument('--depth', type=float, default=None, help='最外缘位移（px），缺省 = 边宽 × 0.45（凸透镜 × 0.3）')
-    ap.add_argument('--lens', action='store_true', help='凸透镜：斜面一直到中线、三次剖面（页面上的 data-lg-refract="lens"）')
+    ap.add_argument('--depth', type=float, default=None, help='最外缘位移（px），缺省 = 边宽 × 0.45（透镜 × 0.345）')
+    ap.add_argument('--lens', action='store_true', help='透镜：斜面一直到中线（页面上的 data-lg-refract="lens"）')
+    ap.add_argument('--power', type=int, default=2, choices=(2, 3), help='剖面指数，缺省 2（平方）；3 是三次剖面')
     ap.add_argument('--thick', type=float, default=None, help=argparse.SUPPRESS)   # 老参数：当 --depth 用
     ap.add_argument('--height', type=float, default=None, help=argparse.SUPPRESS)  # 老参数：不再用
     ap.add_argument('--disp', type=float, default=0.08, help='色散（红多折、蓝少折的比例），缺省 0.08；0 关掉')
-    ap.add_argument('--scatter', type=float, default=0.05, help='边上乳白的浓度，缺省 0.05')
+    ap.add_argument('--scatter', type=float, default=None, help=argparse.SUPPRESS)  # 老参数：1.3 起没有乳白，忽略
     ap.add_argument('--out', help='把贴图写成 PNG')
     ap.add_argument('--svg', action='store_true', help='在标准输出打印一段可直接贴进页面的 SVG 滤镜')
     ap.add_argument('--id', default='lg-static', help='--svg 时滤镜的 id')
@@ -295,13 +302,13 @@ def main():
     if not a.w or not a.h:
         ap.error('需要 --w 与 --h')
     r = a.h / 2 if a.radius is None else a.radius
-    p = 3 if a.lens else 2
+    p = a.power
     if a.lens:
         bezel = min(a.w, a.h) / 2                                 # full_map 里会夹到短边一半减 1，和脚本一样
     else:
         bezel = a.bezel if a.bezel is not None else max(10, min(24, round(min(a.w, a.h) * 0.2)))
     px, r, bezel = full_map(a.w, a.h, r, bezel, p)
-    depth = a.depth if a.depth is not None else a.thick if a.thick is not None else depth_of(bezel, p)
+    depth = a.depth if a.depth is not None else a.thick if a.thick is not None else depth_of(bezel, a.lens, p)
     png = png_rgba8(a.w, a.h, px)
     if a.out:
         with open(a.out, 'wb') as f:
@@ -309,7 +316,7 @@ def main():
         print('写好了 %s：%d×%d，边宽 %.1f，最外缘位移 %.2fpx，feDisplacementMap scale=%.2f'
               % (a.out, a.w, a.h, bezel, depth, 2 * depth), file=sys.stderr)
     if a.svg:
-        sys.stdout.write(svg_filter(a.id, a.w, a.h, png, depth, a.disp, None, a.scatter, bezel))
+        sys.stdout.write(svg_filter(a.id, a.w, a.h, png, depth, a.disp))
     if not a.out and not a.svg:
         print('scale=%.2f（加 --out 写 PNG，或 --svg 打印滤镜）' % (2 * depth))
     return 0

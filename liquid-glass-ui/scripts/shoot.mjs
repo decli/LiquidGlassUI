@@ -4,7 +4,7 @@
  *
  *   node scripts/shoot.mjs                     拍演示页的整套截图到 ./shots/，并做三档校验与一致性校验
  *                                              （每个能点的元素悬停都有反馈、都有跟着指针走的指尖光；所有玻璃同一种材质、并排的胶囊不一深一浅）、
- *                                              折射校验（玻璃正中和不折射时逐像素一样、边上确实在弯；凸透镜和浮起的透镜中间没有平的一块）、
+ *                                              折射校验（玻璃正中和不折射时逐像素一样、边上确实在弯；透镜和浮起的透镜中间没有平的一块）、
  *                                              分段开关校验（按住浮起、按住别的项、拖、甩、橡皮筋、点、玻璃导航条、精简档）
  *   node scripts/shoot.mjs --out design        换输出目录
  *   node scripts/shoot.mjs --check             只做校验，不留截图
@@ -256,7 +256,8 @@ async function regionDiff(a, b, ix, iy) {
  * 折射校验（演示页的那颗玻璃）：同一块玻璃、同一条滤镜链，只把折射那一步换成什么都不做，前后各拍一张。两种剖面各验一遍：
  *   · 默认的玻璃板（data-lg-refract="22 10"）：正中（离边超过边宽、离两端超过圆角）必须逐像素一样——中间一个像素都不重采样；
  *     外圈必须有相当一部分像素变了——边上确实在放大、弯折。
- *   · 凸透镜（data-lg-refract="lens"，演示页现在用的）：中线附近一条带肉眼看不出变化（最大差 ≤ 8）；
+ *   · 透镜（data-lg-refract="lens"，演示页现在用的；边宽到中线、平方剖面、最外缘 0.345 × 边宽）：中线 ±4px 肉眼看不出变化
+ *     （最大差 ≤ 8；1.3 起没有「位移太小就用原图」的门控，靠的是中线附近位移不到半个像素、最近邻取样落回原像素）；
  *     离边 22–32px 那一圈（玻璃板在这里是平的）也在弯（≥ 5% 的像素变了）——整块连续地弯，没有「外面一圈弯、里面一块平」。
  * 换剖面用 LiquidGlass.init() 整套重来（它会重读 data-lg-refract）。
  */
@@ -287,16 +288,16 @@ async function refractCheck() {
   console.log(`  折射（玻璃板）：正中 ${(r.center * 100).toFixed(3)}% 的像素不同（最大差 ${r.centerMax}），外圈 ${(r.edge * 100).toFixed(1)}% 在弯`);
   if (r.center > 0.001 || r.centerMax > 6) { failures.push(`折射校验：玻璃正中被重采样了（${(r.center * 100).toFixed(3)}% 的像素和不折射时不同）`); }
   if (r.edge < 0.03) { failures.push(`折射校验：外圈只有 ${(r.edge * 100).toFixed(1)}% 的像素变了，看不出折射`); }
-  // 凸透镜：压在两行字上（横着的笔画才看得出上下方向的弯折）
+  // 透镜：压在两行字上（横着的笔画才看得出上下方向的弯折）
   s = await shoot('lens', '46px,8px');
-  const L = await bandDiff(s.on, s.off, s.g.w, [[s.g.h / 2 + 8, s.g.h / 2 - 8, s.g.w - s.g.h / 2 - 8, s.g.h / 2 + 8, 3],
+  const L = await bandDiff(s.on, s.off, s.g.w, [[s.g.h / 2 + 8, s.g.h / 2 - 4, s.g.w - s.g.h / 2 - 8, s.g.h / 2 + 4, 3],
     [s.g.h / 2 + 8, 22, s.g.w - s.g.h / 2 - 8, 32, 24], [s.g.h / 2 + 8, s.g.h - 32, s.g.w - s.g.h / 2 - 8, s.g.h - 22, 24]]);
   const inner = Math.max(L[1].frac, L[2].frac);
-  console.log(`  折射（凸透镜）：中线附近最大差 ${L[0].max}；离边 22–32px 那一圈 ${(inner * 100).toFixed(1)}% 在弯（玻璃板在这里是平的）`);
-  if (L[0].max > 8) { failures.push(`折射校验：凸透镜中线附近变化太大（最大差 ${L[0].max}），中间的字会糊`); }
-  if (inner < 0.05) { failures.push(`折射校验：凸透镜离边 22–32px 那一圈只有 ${(inner * 100).toFixed(1)}% 在弯——中间还是一块平的，看着像两个椭圆`); }
-  // 浮起的透镜也是凸透镜：按住导航条第二项不动，开 / 关折射各拍一张。中线上下 0.12–0.19 倍高那两条带，
-  // 平方剖面（斜面占半高六成）在这里是平的——透镜里一块原样、外圈在弯，就是「两个椭圆套在一起」
+  console.log(`  折射（透镜）：中线 ±4px 最大差 ${L[0].max}；离边 22–32px 那一圈 ${(inner * 100).toFixed(1)}% 在弯（玻璃板在这里是平的）`);
+  if (L[0].max > 8) { failures.push(`折射校验：透镜中线附近变化太大（最大差 ${L[0].max}），中间的字会糊`); }
+  if (inner < 0.05) { failures.push(`折射校验：透镜离边 22–32px 那一圈只有 ${(inner * 100).toFixed(1)}% 在弯——中间还是一块平的，看着像两个椭圆`); }
+  // 浮起的透镜也是边宽到中线的透镜：按住导航条第二项不动，开 / 关折射各拍一张。中线上下 0.12–0.19 倍高那两条带，
+  // 1.1 版的透镜（斜面占半高六成）在这里是平的——透镜里一块原样、外圈在弯，就是「两个椭圆套在一起」
   await p.locator('.demo-tabbar').evaluate(e => e.closest('.demo-phone').scrollIntoView({ block: 'center' }));
   await p.waitForTimeout(300);
   const tb = await p.locator('.demo-tabbar > button').nth(1).boundingBox();

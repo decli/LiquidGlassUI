@@ -3,7 +3,7 @@ name: liquid-glass-ui
 license: MIT
 description: >-
   把网页界面做成 Apple Liquid Glass（液态玻璃）风格的完整套件与方法：可直接拷用、零依赖的 CSS + ES5 脚本
-  （背景模糊 + 照 iOS 26 的边缘折射——边上放大、模糊、散射、色散，正中原样、会流动的透镜悬停、液态滑块、
+  （背景模糊 + 照 iOS 26 的边缘折射——边上放大、带一点色散，正中原样、会流动的透镜悬停、液态滑块、
   分段开关按住浮起成一块会折射的透镜并能拖 / 橡皮筋 / 甩、指尖光、玻璃提示、HDR 高光、完整/精简/关闭三档与自动降级），
   外加定稿的设计规范、技术原理、踩坑清单、多轮评审的设计决策，以及静态检查与真浏览器截图校验脚本。
   只要用户提到 Liquid Glass、液态玻璃、毛玻璃、玻璃拟态、glassmorphism、frosted glass、backdrop-filter、
@@ -18,7 +18,7 @@ description: >-
 内容层（卡片、表格）是不透光的「实心厚玻璃」；悬停是一颗会流动的清玻璃透镜，选中是一块前沿先到、后沿后到的液态滑块；
 分段开关像 iOS 26 的标签栏，按住任一项它浮起成一块盖在字上面、会折射的透镜，能拖、拖过两端像橡皮筋；
 还有一条浮在内容上面的玻璃导航条（`.lg-seg--glass`，图标 + 字）。
-玻璃边的折射照 iOS 26：边上那一圈把背后的内容放大、轻微模糊、泛一层乳白和一点彩边，正中一个像素都不动。
+玻璃边的折射照 iOS 26：边上那一圈把背后的内容放大、带一点彩边，正中一个像素都不动。
 不需要构建、不依赖任何库、不走 CDN；不加载脚本页面照样能用。脚本引进来就自己跑：页面里两行标签，或者 `npm i` 之后 import 一次。
 
 这里的每个数值和做法都经过了多轮真机评审——先用现成的，别从零重写。
@@ -55,7 +55,7 @@ description: >-
 1. 引入，按项目的形态选一种（`references/integration.md` §1）：
    - **普通页面 / 服务端模板**：把 `assets/liquid-glass.css`、`assets/liquid-glass.js` 拷进项目静态目录（保留文件头注释），
      `<head>` 里一个 `<link>`、一个 `<script>`——脚本放 `<head>` 时自己会在页面画出来之前写好档位，不用再加内联脚本。
-   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.2.1`（用户能访问这个仓库时），
+   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.3.0`（用户能访问这个仓库时），
      入口里 `import 'liquid-glass-ui/liquid-glass.css'` + `import LiquidGlass from 'liquid-glass-ui'`；访问不了就把 assets 下四个文件拷进项目，
      照样 import 相对路径。要改配置在 import 之后调 `LiquidGlass.init({ … })`。服务端渲染时 import 不会报错，不用 `typeof window` 判断。
 2. 不要在组件里初始化、也不要在路由切换后调什么：脚本用 `MutationObserver` 自己发现变化。`init()` 整页一份，只在启动时调。
@@ -119,9 +119,11 @@ node scripts/shoot.mjs --url http://localhost:8080/ [--key 你的档位存储键
   粘在能滚的内容底部（integration.md §7.3）；无头截图里矮条看着没模糊是无头浏览器的问题（pitfalls.md #34），要在实机上看。
 - **「要 iOS 26 标签栏那种按住浮起、能拖的选项」**：直接用 `.lg-seg`（或 `data-lg-slider` + `data-lg-kind="seg"`），已经带了；
   页面的点击处理要能处理 `element.click()`（拖完松手脚本替用户点一下落到的那一项），见 integration.md §7.3。
-- **「要一块像凸透镜的玻璃」**（可拖的水滴、旋钮、放大镜这类一小块独立的玻璃）：`data-lg-refract="lens"`——整块连续地弯，
+- **「要一块像透镜的玻璃」**（可拖的水滴、旋钮、放大镜这类一小块独立的玻璃）：`data-lg-refract="lens"`——整块连续地弯，
   不会像「外面一圈在弯、里面一块平」两个椭圆；面板、菜单这种大块的玻璃照旧用默认（pitfalls.md #43）。
-- **「要一个静态的、不跑脚本的折射」**：`python3 scripts/displacement_map.py --w 宽 --h 高 --svg`（凸透镜加 `--lens`）生成一段滤镜贴进页面（仅 Chromium，元素尺寸必须固定）。
+- **「要一个静态的、不跑脚本的折射」**：`python3 scripts/displacement_map.py --w 宽 --h 高 --svg`（透镜加 `--lens`）生成一段滤镜贴进页面（仅 Chromium，元素尺寸必须固定）。
+- **「Mac 上透镜里有一圈接缝」**：别往滤镜链里加按位移加权的门控、模糊层、乳白——Mac 上 Chrome 的 Skia Graphite 会把它画成硬边（pitfalls.md #45）；
+  调参要在真实页面上做开关让用户现场切换，不要做对照格让用户看图回报。
 - **「为什么是这个样子 / 能不能改回 X」**：先看 `references/design-decisions.md`，把当时的理由告诉用户，再一起决定。
 
 ## 交付时告诉用户

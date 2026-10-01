@@ -1,5 +1,5 @@
 /*!
- * Liquid Glass UI —— 样式 v1.2.1
+ * Liquid Glass UI —— 样式 v1.3.0
  *
  * 一套照 Apple Liquid Glass 做的网页材质与组件：控制层（侧栏、页头胶囊、弹出层、工具条、提示）是玻璃，
  * 内容层（卡片、表格）是不透光的「实心厚玻璃」。动效与折射由同目录的 liquid-glass.js 驱动，
@@ -109,8 +109,6 @@
   --lg-hl-onsel-tint: rgba(255, 255, 255, .08);
   --lg-hl-rim: linear-gradient(165deg, #ffffff, rgba(255, 255, 255, .35) 30%, rgba(15, 23, 42, .04) 62%, rgba(15, 23, 42, .16));
   --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .95), inset 0 -1px 2px rgba(15, 23, 42, .07);
-  /* 折射的玻璃边上那层很淡的乳白（散射）。深色底上同样的白要淡一半，不然边上一圈发灰 */
-  --lg-scatter: #ffffff;
   /* 玻璃导航条停着时的选中项：一块平胶囊，浅色里比玻璃略深一点、深色里略亮一点，只有一道很淡的顶边高光 */
   --lg-tab-sel: linear-gradient(180deg, rgba(23, 32, 42, .085), rgba(23, 32, 42, .06));
   --lg-tab-sel-sh: inset 0 1px 0 rgba(255, 255, 255, .55), inset 0 0 0 .5px rgba(23, 32, 42, .04);
@@ -177,7 +175,6 @@
   --lg-hl-onsel-tint: rgba(255, 255, 255, .06);
   --lg-hl-rim: linear-gradient(165deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .1) 30%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .22));
   --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 -1px 2px rgba(0, 0, 0, .3);
-  --lg-scatter: rgba(255, 255, 255, .45);
   --lg-tab-sel: linear-gradient(180deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .075));
   --lg-tab-sel-sh: inset 0 1px 0 rgba(255, 255, 255, .13), inset 0 0 0 .5px rgba(255, 255, 255, .05);
   --lg-lift-sh: 0 0 0 .5px rgba(255, 255, 255, .1), 0 8px 18px -8px rgba(0, 0, 0, .5);
@@ -243,7 +240,6 @@
     --lg-hl-onsel-tint: rgba(255, 255, 255, .06);
     --lg-hl-rim: linear-gradient(165deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .1) 30%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .22));
     --lg-hl-inset: inset 0 1px 1px rgba(255, 255, 255, .14), inset 0 -1px 2px rgba(0, 0, 0, .3);
-    --lg-scatter: rgba(255, 255, 255, .45);
     --lg-tab-sel: linear-gradient(180deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .075));
     --lg-tab-sel-sh: inset 0 1px 0 rgba(255, 255, 255, .13), inset 0 0 0 .5px rgba(255, 255, 255, .05);
     --lg-lift-sh: 0 0 0 .5px rgba(255, 255, 255, .1), 0 8px 18px -8px rgba(0, 0, 0, .5);
