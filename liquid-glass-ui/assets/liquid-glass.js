@@ -1,5 +1,5 @@
 /*!
- * Liquid Glass UI —— 交互层 v1.2.0
+ * Liquid Glass UI —— 交互层 v1.2.1
  *
  * 只管「看着像玻璃、摸着像水」，不碰业务：不发请求、不改表单、不改页面元素的 class。
  * 删掉这个 <script>，页面照样能用——liquid-glass.css 里有不带脚本的退路。
@@ -54,7 +54,7 @@
    */
   function inert() {
     var self = {
-      version: '1.2.0', supported: false,
+      version: '1.2.1', supported: false,
       init: function () { return self; }, mode: function () { return 'off'; }, tier: function () { return 'l0'; },
       setMode: function () {}, refresh: function () {}, describe: function () { return ''; }, notify: function () {}
     };
@@ -414,7 +414,8 @@
   /**
    * 一块玻璃的滤镜。disp > 0 时红绿蓝三路分开位移（色散），否则一路。
    *   位移图：透明的 128 底 + 九宫格八块（贴图没加载出来时那一块是透明的，m = 0，用原图——绝不会整片错位）
-   *   → 位移（放大）→ 按 m^1.6 叠一层模糊 → 按 m 叠一层乳白 → 只在 m 明显的地方用（m × 12 截到 1）→ 按形状裁 → 垫在原图上面
+   *   → 位移（放大；色散按 2m 叠上）→ 按 m^1.6 叠一层模糊 → 按 m 叠一层乳白
+   *   → 只在位移超过 1/4 像素的地方用（m × max(12, 4 × 最外缘位移) 截到 1）→ 按形状裁 → 垫在原图上面
    * color-interpolation-filters 必须是 sRGB（缺省的线性 RGB 会把 128 算成 55 左右，整片往一边偏）；
    * 滤镜区域用缺省值（写 userSpaceOnUse 加 x/y 坐标原点会跑掉）。
    * 乳白的颜色走令牌 --lg-scatter：深色底上同样的白要淡一半，不然边上一圈发灰。
@@ -422,7 +423,7 @@
   function newFilter(disp) {
     var id = 'lgf-' + (++filterSeq), i;
     var f = svgEl('filter', { id: id, 'color-interpolation-filters': 'sRGB' });
-    var F = { id: id, node: f, disp: disp, parts: {}, dm: [], soft: null, veil: null, sig: '' };
+    var F = { id: id, node: f, disp: disp, parts: {}, dm: [], soft: null, veil: null, rim: null, sig: '' };
     function fe(name, attrs) { return f.appendChild(svgEl(name, attrs)); }
     function merge(result, ins) {
       var m = fe('feMerge', result ? { result: result } : {});
@@ -446,11 +447,18 @@
         fe('feColorMatrix', { 'in': 'd' + ch, type: 'matrix', values: ONLY[ch], result: 'c' + ch });
       }
       fe('feComposite', { 'in': 'cR', in2: 'cG', operator: 'arithmetic', k1: '0', k2: '1', k3: '1', k4: '0', result: 'rg' });
-      fe('feComposite', { 'in': 'rg', in2: 'cB', operator: 'arithmetic', k1: '0', k2: '1', k3: '1', k4: '0', result: 'sharp' });
+      fe('feComposite', { 'in': 'rg', in2: 'cB', operator: 'arithmetic', k1: '0', k2: '1', k3: '1', k4: '0', result: 'rgb' });
     } else {
       F.dm.push(fe('feDisplacementMap', { 'in': 'SourceGraphic', in2: 'map', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G', result: 'sharp' }));
     }
     fe('feColorMatrix', { 'in': 'map', type: 'matrix', values: '0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0', result: 'm' });
+    if (disp) {
+      // 色散只在边上：三路分开的那份按 2m（截到 1）叠在绿路那份（三路同一位移）上面。里面位移不大时三路
+      // 各自取整到不同像素，字和图标的边会泛红泛青；透镜剖面一直伸到中线时这层彩边会铺满整片。
+      alpha('m', 'dw', { type: 'linear', slope: '2', intercept: '0' });
+      fe('feComposite', { 'in': 'rgb', in2: 'dw', operator: 'in', result: 'rgbIn' });
+      merge('sharp', ['dG', 'rgbIn']);
+    }
     F.soft = fe('feGaussianBlur', { 'in': 'sharp', stdDeviation: '0.5', result: 'soft' });
     alpha('m', 'bw', { type: 'gamma', amplitude: '1', exponent: '1.6', offset: '0' });
     fe('feComposite', { 'in': 'soft', in2: 'bw', operator: 'in', result: 'softIn' });
@@ -460,7 +468,7 @@
     F.veil = alpha('m', 'vw', { type: 'linear', slope: '0.05', intercept: '0' });
     fe('feComposite', { 'in': 'white', in2: 'vw', operator: 'in', result: 'veil' });
     merge('glowed', ['lensed', 'veil']);
-    alpha('m', 'rw', { type: 'linear', slope: '12', intercept: '0' });
+    F.rim = alpha('m', 'rw', { type: 'linear', slope: '12', intercept: '0' });
     fe('feComposite', { 'in': 'glowed', in2: 'rw', operator: 'in', result: 'rim' });
     fe('feComposite', { 'in': 'rim', in2: 'map', operator: 'in', result: 'shaped' });
     merge('', ['SourceGraphic', 'shaped']);
@@ -508,6 +516,9 @@
     } else { F.dm[0].setAttribute('scale', s.toFixed(2)); }
     F.soft.setAttribute('stdDeviation', Math.max(0.5, blur).toFixed(2));
     F.veil.setAttribute('slope', String(scat));
+    // 位移不到 1/4 像素就用原图（中间一个像素都不重采样）。固定 ×12 时，深的透镜在位移已近 1px 的地方还在
+    // 把原图和折射结果对半掺，掺到哪儿算哪儿——那一圈是看得出来的。
+    F.rim.setAttribute('slope', Math.max(12, 4 * depth).toFixed(1));
   }
 
   /**
@@ -973,8 +984,9 @@
     if (!L.F) { L.F = newFilter(0.06); L.ref.style.setProperty('--lg-ref', 'url(#' + L.F.id + ')'); }
     var w = Math.round(L.pw != null ? L.pw : L.w), h = Math.round(L.ph != null ? L.ph : L.h);   // 画出来的尺寸（可能被关进滚动范围时收过）
     if (w < 8 || h < 8) { return; }
-    var r = L.rad != null ? Math.min(L.rad, h / 2) : h / 2, bez = Math.min(12, h * 0.32);
-    setGeom(L.F, w, h, r, { bezel: bez, depth: bez * K, blur: Math.max(0.5, h * 0.02), disp: 0.06, scatter: 0.05 });
+    // 凸透镜剖面（斜面到中线、三次方）：会动的一小颗玻璃整块连续地弯，没有「外圈弯、内圈平」的接缝；字在正中，照样清楚
+    var r = L.rad != null ? Math.min(L.rad, h / 2) : h / 2;
+    setGeom(L.F, w, h, r, { bezel: h / 2, power: 3, blur: Math.max(0.5, h * 0.02), disp: 0.06, scatter: 0.05 });
   }
 
   /** 透镜底下是不是指针（不是键盘）：整行的指尖光只在指针在的时候亮 */
@@ -1318,9 +1330,10 @@
     Z.el.style.width = L.w + 'px';
     Z.el.style.height = L.h + 'px';
     Z.el.style.transform = 'translate3d(' + L.x.toFixed(2) + 'px,' + L.y.toFixed(2) + 'px,0)';
-    // 透镜：斜面占半高的六成，正中约四成高原样透出；色散比面板略重（字就在它底下）
-    var bez = 0.3 * L.h;
-    setGeom(Z.F, L.w, L.h, L.h / 2, { bezel: bez, depth: bez * K, blur: Math.max(0.5, L.h * 0.024), disp: 0.1, scatter: 0.06 });
+    // 透镜：凸透镜剖面——斜面一直到中线、三次方（data-lg-refract="lens" 同一条），整块连续地弯。
+    // 以前斜面只占半高的六成、正中四成原样透出，停在两项之间时边上的字被拉开、中间一块不动，看着是两个椭圆套在一起。
+    // 最外缘只往里取 0.3 × 半高（约 10px），整条导航条自己的边（离透镜的边约 6px）采不到，不会被放大成一道彩边；色散比面板略重
+    setGeom(Z.F, L.w, L.h, L.h / 2, { bezel: L.h / 2, power: 3, blur: Math.max(0.5, L.h * 0.024), disp: 0.1, scatter: 0.06 });
     Z.ref.style.opacity = clamp((up - 0.15) / 0.6, 0, 1).toFixed(3);
     // 边：从平胶囊的大小长到透镜的大小（浮起的回弹让它略大一点再收回），很快淡入
     var rx = w / L.w + (1 - w / L.w) * up, ry = h / L.h + (1 - h / L.h) * up;
@@ -1872,7 +1885,7 @@
   }
 
   var api = win.LiquidGlass = {
-    version: '1.2.0',
+    version: '1.2.1',
     /** true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身 */
     supported: true,
     /** 换配置（同 window.LiquidGlassConfig 的选项），返回 LiquidGlass 本身 */

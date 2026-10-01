@@ -55,7 +55,7 @@ description: >-
 1. 引入，按项目的形态选一种（`references/integration.md` §1）：
    - **普通页面 / 服务端模板**：把 `assets/liquid-glass.css`、`assets/liquid-glass.js` 拷进项目静态目录（保留文件头注释），
      `<head>` 里一个 `<link>`、一个 `<script>`——脚本放 `<head>` 时自己会在页面画出来之前写好档位，不用再加内联脚本。
-   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.2.0`（用户能访问这个仓库时），
+   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.2.1`（用户能访问这个仓库时），
      入口里 `import 'liquid-glass-ui/liquid-glass.css'` + `import LiquidGlass from 'liquid-glass-ui'`；访问不了就把 assets 下四个文件拷进项目，
      照样 import 相对路径。要改配置在 import 之后调 `LiquidGlass.init({ … })`。服务端渲染时 import 不会报错，不用 `typeof window` 判断。
 2. 不要在组件里初始化、也不要在路由切换后调什么：脚本用 `MutationObserver` 自己发现变化。`init()` 整页一份，只在启动时调。

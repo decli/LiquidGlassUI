@@ -49,7 +49,7 @@
 **npm / 打包工具**（Vite、webpack、Next.js、Nuxt……；服务端渲染时 import 也不会报错）：
 
 ```bash
-npm i github:decli/LiquidGlassUI#v1.2.0
+npm i github:decli/LiquidGlassUI#v1.2.1
 ```
 
 ```js

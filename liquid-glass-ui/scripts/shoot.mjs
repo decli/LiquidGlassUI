@@ -4,7 +4,7 @@
  *
  *   node scripts/shoot.mjs                     拍演示页的整套截图到 ./shots/，并做三档校验与一致性校验
  *                                              （每个能点的元素悬停都有反馈、都有跟着指针走的指尖光；所有玻璃同一种材质、并排的胶囊不一深一浅）、
- *                                              折射校验（玻璃正中和不折射时逐像素一样、边上确实在弯）、
+ *                                              折射校验（玻璃正中和不折射时逐像素一样、边上确实在弯；凸透镜和浮起的透镜中间没有平的一块）、
  *                                              分段开关校验（按住浮起、按住别的项、拖、甩、橡皮筋、点、玻璃导航条、精简档）
  *   node scripts/shoot.mjs --out design        换输出目录
  *   node scripts/shoot.mjs --check             只做校验，不留截图
@@ -295,6 +295,26 @@ async function refractCheck() {
   console.log(`  折射（凸透镜）：中线附近最大差 ${L[0].max}；离边 22–32px 那一圈 ${(inner * 100).toFixed(1)}% 在弯（玻璃板在这里是平的）`);
   if (L[0].max > 8) { failures.push(`折射校验：凸透镜中线附近变化太大（最大差 ${L[0].max}），中间的字会糊`); }
   if (inner < 0.05) { failures.push(`折射校验：凸透镜离边 22–32px 那一圈只有 ${(inner * 100).toFixed(1)}% 在弯——中间还是一块平的，看着像两个椭圆`); }
+  // 浮起的透镜也是凸透镜：按住导航条第二项不动，开 / 关折射各拍一张。中线上下 0.12–0.19 倍高那两条带，
+  // 平方剖面（斜面占半高六成）在这里是平的——透镜里一块原样、外圈在弯，就是「两个椭圆套在一起」
+  await p.locator('.demo-tabbar').evaluate(e => e.closest('.demo-phone').scrollIntoView({ block: 'center' }));
+  await p.waitForTimeout(300);
+  const tb = await p.locator('.demo-tabbar > button').nth(1).boundingBox();
+  await p.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2); await p.mouse.down(); await p.waitForTimeout(900);
+  const lift = p.locator('.demo-tabbar .lg-lift');
+  const lg = await lift.evaluate(l => ({ w: l.offsetWidth, h: l.offsetHeight }));
+  const lclip = await lift.boundingBox();
+  const lon = await p.screenshot({ clip: lclip });
+  await p.evaluate(() => { document.querySelector('.demo-tabbar .lg-lift-ref').style.backdropFilter = 'none'; });
+  await p.waitForTimeout(200);
+  const loff = await p.screenshot({ clip: lclip });
+  await p.mouse.up();
+  const H = lg.h, x0 = H / 2, x1 = lg.w - H / 2;
+  const F = await bandDiff(lon, loff, lg.w, [[x0, H / 2 - 4, x1, H / 2 + 4, 3], [x0, H * 0.31, x1, H * 0.38, 24], [x0, H * 0.62, x1, H * 0.69, 24]]);
+  const band = Math.max(F[1].frac, F[2].frac);
+  console.log(`  折射（浮起的透镜）：中线附近最大差 ${F[0].max}；中线上下 0.12–0.19 倍高那两条带 ${(band * 100).toFixed(1)}% 在弯`);
+  if (F[0].max > 8) { failures.push(`折射校验：浮起的透镜中线附近变化太大（最大差 ${F[0].max}），底下的字会糊`); }
+  if (band < 0.03) { failures.push(`折射校验：浮起的透镜中线上下那两条带只有 ${(band * 100).toFixed(1)}% 在弯——中间一块平的，看着像两个椭圆套在一起`); }
   await close(o, 'refract');
 }
 

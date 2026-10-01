@@ -57,7 +57,7 @@
 ### B. npm / 打包工具（Vite、webpack、Next.js、Nuxt……）
 
 ```bash
-npm i github:decli/LiquidGlassUI#v1.2.0     # 装某个发布版；仓库是私有的，本机的 git 要能 clone 它
+npm i github:decli/LiquidGlassUI#v1.2.1     # 装某个发布版；仓库是私有的，本机的 git 要能 clone 它
 ```
 
 ```js
@@ -188,7 +188,7 @@ window.LiquidGlassConfig = {
 ## 6. 脚本接口与事件
 
 ```js
-LiquidGlass.version      // '1.2.0'
+LiquidGlass.version      // '1.2.1'
 LiquidGlass.supported    // true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身（方法都在，什么都不做）
 LiquidGlass.init({ … })  // 换配置（第 5 节），返回 LiquidGlass 本身
 LiquidGlass.mode()       // 用户选的档：'auto' | 'full' | 'lite' | 'off'
