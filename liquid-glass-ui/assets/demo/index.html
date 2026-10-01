@@ -52,9 +52,10 @@
   }
   .demo-drop:active { cursor: grabbing; }
   .demo-bottom-pad { height: 30px; }
-  /* 玻璃导航条演示：一块能滚的内容，导航条粘在它底部，内容从玻璃底下滚过 */
+  /* 玻璃导航条演示：一块能滚的内容，导航条粘在它底部，内容从玻璃底下滚过。
+     横向不滚：拖过两端时导航条像橡皮筋被拉长 ≤ 18px，容器横向要是能滚，就会闪出横滚动条 */
   .demo-phone {
-    position: relative; height: 300px; overflow: auto; margin-top: 10px; padding: 12px 12px 0;
+    position: relative; height: 300px; overflow-x: hidden; overflow-y: auto; margin-top: 10px; padding: 12px 12px 0;
     border-radius: 18px; background: var(--lg-surface-2); overscroll-behavior: contain;
   }
   .demo-post { padding: 12px 14px; border-radius: 14px; background: var(--lg-surface); box-shadow: var(--lg-card-sh); font-size: 13px; }

@@ -235,6 +235,7 @@ document.addEventListener('lg:modechange', function (e) {
 ```
 
 `.lg-glass` 自带 `position: relative; z-index: 0`，要粘住就用更具体的选择器（或内联样式）改成 `sticky` / `fixed`。
+装导航条的滚动容器横向别让它滚（`overflow-x: hidden; overflow-y: auto`）：拖过两端时条像橡皮筋被拉长 ≤ 18px，横向能滚的话就会闪出横滚动条。
 选中项的图标和字是主色；整条的边默认不折射，背后有大图想看到边缘弯折就加 `data-lg-refract="9 4"`。
 
 ### 7.4 三档开关

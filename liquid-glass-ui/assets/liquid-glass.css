@@ -455,10 +455,11 @@ select.lg-field {
 .lg-seg[data-lg-slider-on] { -webkit-user-select: none; user-select: none; touch-action: pan-y; }
 .lg-seg[data-lg-slider-on] > button { cursor: grab; }
 .lg-seg[data-lg-drag], .lg-seg[data-lg-drag] > button { cursor: grabbing; }
-/* 拖动中：离滑块最近的那一项先变成选中的样子，原来选中的那一项退回普通 */
-.lg-seg[data-lg-drag] > button { color: var(--lg-ink-2); font-weight: 400; }
-.lg-seg--sm[data-lg-drag] > button { font-weight: 600; }
-.lg-seg[data-lg-drag] > button[data-lg-near] { color: var(--lg-ink); font-weight: 600; }
+/* 拖动中、浮着飞的路上：离玻璃最近的那一项先变成选中的样子，其余（包括页面已经标成选中的那一项）退回普通——
+   选中色跟着玻璃走，而不是一点就跳到终点 */
+.lg-seg[data-lg-drag] > button, .lg-seg[data-lg-fly] > button { color: var(--lg-ink-2); font-weight: 400; }
+.lg-seg--sm[data-lg-drag] > button, .lg-seg--sm[data-lg-fly] > button { font-weight: 600; }
+.lg-seg[data-lg-drag] > button[data-lg-near], .lg-seg[data-lg-fly] > button[data-lg-near] { color: var(--lg-ink); font-weight: 600; }
 .lg-seg--sm { padding: 2px; border-radius: 15px; }
 .lg-seg--sm > button { height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600; }
 .lg-seg--block { display: flex; }
@@ -479,8 +480,8 @@ select.lg-field {
   background: var(--lg-tab-sel); box-shadow: var(--lg-tab-sel-sh); color: var(--lg-accent);
 }
 .lg-seg--glass > .lg-thumb-seg { background: var(--lg-tab-sel); box-shadow: var(--lg-tab-sel-sh); }
-.lg-seg--glass[data-lg-drag] > button { color: var(--lg-ink-2); font-weight: 600; }
-.lg-seg--glass[data-lg-drag] > button[data-lg-near] { color: var(--lg-accent); }
+.lg-seg--glass[data-lg-drag] > button, .lg-seg--glass[data-lg-fly] > button { color: var(--lg-ink-2); font-weight: 600; }
+.lg-seg--glass[data-lg-drag] > button[data-lg-near], .lg-seg--glass[data-lg-fly] > button[data-lg-near] { color: var(--lg-accent); }
 
 /* ══ 9 侧栏 ═════════════════════════════════════════════════════════════
  * 一块浮在页面底上的玻璃板：离窗口边 12px、圆角 24px。侧栏自己不滚，中间的 .lg-nav 滚——

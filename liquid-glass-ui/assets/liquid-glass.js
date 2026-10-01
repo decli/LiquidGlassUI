@@ -580,7 +580,9 @@
     // 分段开关：浮起带一点回弹、落下不回弹；橡皮筋弹回时冲过头压扁一下
     up: spring(0.38, 0.3), down: spring(0.26, 0), band: spring(0.5, 0.5),
     // 拖着的时候滑块追手指：很快、不回弹（直接写位置的话，按下后立刻拖，滑块会从半路一下跳到手指下面）
-    drag: spring(0.12, 0)
+    drag: spring(0.12, 0),
+    // 浮着飞：整块玻璃一起平移（两条边同一根弹簧，不拉长），带一点冲过头再回来
+    fly: spring(0.4, 0.28)
   };
   // 一帧拆成不超过 4ms 的小步：刚度高的弹簧（拖动时追手指的那根）在一步 34ms 的慢帧里会发散，一下飞出几百万像素
   function step(o, p, v, target, c, dt) {
@@ -636,6 +638,27 @@
       y = a.top - b.top - surf.clientTop + surf.scrollTop;
     }
     return { x: x, y: y, w: t.offsetWidth, h: t.offsetHeight };
+  }
+
+  /**
+   * 装透镜 / 滑块的容器若是滚动容器（overflow: auto / scroll），记下内容的范围：画的时候整块不许伸出去。
+   * 伸出去一个像素，滚动尺寸就被撑大，滚动条闪一下（表格最后一行：透镜回弹往下多冲 1px，竖滚动条一出来又挤出横滚动条）。
+   * 量的时候透镜一直被关在里面，所以量到的就是内容本身的范围。
+   */
+  function scrollBox(el) {
+    var s = win.getComputedStyle(el);
+    if (!/auto|scroll/.test(s.overflowX + ' ' + s.overflowY)) { return null; }
+    return { w: el.scrollWidth, h: el.scrollHeight };
+  }
+  /** 把以 (x, y) 为左上角、w × h、以中心缩放 (sx, sy) 的一块挪回 box 里面；返回挪过的左上角 */
+  function keepIn(box, x, y, w, h, sx, sy) {
+    if (!box) { return [x, y]; }
+    var cx = x + w / 2, cy = y + h / 2, hw = w * sx / 2, hh = h * sy / 2;
+    if (cx + hw > box.w) { cx = box.w - hw; }
+    if (cx - hw < 0) { cx = hw; }
+    if (cy + hh > box.h) { cy = box.h - hh; }
+    if (cy - hh < 0) { cy = hh; }
+    return [cx - w / 2, cy - h / 2];
   }
 
   function isOn(el) {
@@ -709,7 +732,7 @@
       surf: surf, cfg: cfg, el: null, ref: null, F: null,
       x: 0, y: 0, w: 0, h: 0, vx: 0, vy: 0, vw: 0, vh: 0, tx: 0, ty: 0, tw: 0, th: 0,
       a: 0, va: 0, ta: 0, p: 0, vp: 0, tp: 0, px: 0.5, py: 0.5,
-      cur: null, items: [], rad: null, settled: false, still: false, hover: false, focus: false, offT: 0
+      cur: null, items: [], rad: null, settled: false, still: false, hover: false, focus: false, offT: 0, clip: null
     };
     L.step = function (dt) { return lensStep(L, dt); };
     L.paint = function () { lensPaint(L); };
@@ -731,10 +754,20 @@
     }
   }
 
+  /** 分段开关被按住 / 滑块在飞：悬停透镜立刻撤掉（不淡出）。它留在终点那一项底下，看着就像选中「跳」过去了 */
+  function quietLens(surf) {
+    var L = surf.__lgL;
+    if (!L) { return; }
+    clearTimeout(L.offT);
+    L.hover = L.focus = false; L.cur = null; L.ta = 0; L.a = 0; L.va = 0; L.tp = 0; L.p = 0; L.vp = 0;
+    animate(L);
+  }
+
   function lensTo(f, ev) {
     var surf = f.surf, t = f.item, cfg = f.cfg;
     if (mode === 'off' || t.disabled || t.getAttribute('aria-disabled') === 'true' || !visible(t)) { return; }
-    if (surf.__lgT && surf.__lgT.drag && surf.__lgT.drag.moved) { return; }   // 正拖着分段开关的滑块：不要两层玻璃
+    // 分段开关正被按着、或者滑块正浮着飞：不要悬停透镜（两块玻璃，而且它先到终点）
+    if (surf.__lgT && (surf.__lgT.drag || surf.__lgT.fly)) { return; }
     if (t.tagName === 'TR' && !t.querySelector('td')) { return; }   // 表头行（表格没写 <thead> 时它也在 tbody 里）不要透镜
     var L = surf.__lgL;
     if (!L || L.surf !== surf || L.cfg !== cfg) {
@@ -754,6 +787,7 @@
 
   function retarget(L, ev) {
     var t = L.cur, r = relRect(L.surf, t), pad = L.cfg.pad || 0;
+    L.clip = scrollBox(L.surf);
     if (isOn(t)) { L.el.setAttribute('data-onsel', ''); } else { L.el.removeAttribute('data-onsel'); }
     if (L.cfg.rad != null) { L.rad = L.cfg.rad + pad; }
     else {
@@ -824,7 +858,8 @@
     el.style.width = Math.max(0, L.w).toFixed(2) + 'px';
     el.style.height = Math.max(0, L.h).toFixed(2) + 'px';
     el.style.borderRadius = (L.rad != null ? L.rad : Math.max(0, Math.min(L.w, L.h)) / 2).toFixed(2) + 'px';
-    el.style.transform = 'translate3d(' + (L.x + ox).toFixed(2) + 'px,' + (L.y + oy).toFixed(2) + 'px,0) scale('
+    var at = keepIn(L.clip, L.x + ox, L.y + oy, L.w, L.h, sx * s0, sy * s0);
+    el.style.transform = 'translate3d(' + at[0].toFixed(2) + 'px,' + at[1].toFixed(2) + 'px,0) scale('
       + (sx * s0).toFixed(4) + ',' + (sy * s0).toFixed(4) + ')';
     el.style.setProperty('--a', a.toFixed(3));
     el.style.setProperty('--p', Math.max(0, p).toFixed(3));
@@ -912,7 +947,8 @@
         T.el = null; T.cur = null; T.a = T.ta = T.va = 0;
         if (T.drag) { T.drag.moved = false; dragStop(T); }
         dropLift(T); segNear(T, null);
-        T.up = T.tup = T.vup = 0; T.st = T.vst = 0; T.fly = false; segStretch(T);
+        T.up = T.tup = T.vup = 0; T.st = T.vst = 0; T.fly = false; T.S = null; segStretch(T);
+        if (th[i].hasAttribute('data-lg-fly')) { th[i].removeAttribute('data-lg-fly'); }
       }
       th[i].removeAttribute('data-lg-slider-on');
     }
@@ -950,7 +986,8 @@
       cl: SP.same, cr: SP.same, ct: SP.same, cb: SP.same, a: 0, va: 0, ta: 0, rad: null, w0: 0,
       // 分段开关才用（§5.5）：浮起 up、浮着飞 fly、整条被拉长 / 压扁 st（钉住 pin 那一端）、拖动 drag、浮起的透镜 lz
       up: 0, vup: 0, tup: 0, fly: false, st: 0, vst: 0, pin: 'left', stKey: '', drag: null, lz: null, near: null, pad: 0, userAt: 0,
-      pend: null   // 松手后替用户选的那一项，等页面接手（{ el, until }）
+      pend: null,  // 松手后替用户选的那一项，等页面接手（{ el, until }）
+      S: null, clip: null   // 浮着飞时各项的位置（字的选中色跟着玻璃走）；滚动容器的内容范围
     };
     T.step = function (dt) { return thumbStep(T, dt); };
     T.paint = function () { thumbPaint(T); };
@@ -995,6 +1032,7 @@
     for (i = 0; i < list.length; i++) { if (isOn(list[i]) && visible(list[i])) { cur = list[i]; break; } }
     var jump = T.a < 0.05 || calm() || (T.resized && surf.offsetWidth !== T.w0);
     T.resized = false; T.w0 = surf.offsetWidth;
+    T.clip = scrollBox(surf);
     if (T.drag) {                                    // 按着的时候滑块听手指的；整片重画了就作废，按页面现在的选中落定
       for (i = 0; i < T.drag.S.length; i++) { if (!surf.contains(T.drag.S[i].el)) { dragStop(T); break; } }
       if (T.drag) { return; }
@@ -1018,13 +1056,14 @@
     if (T.cur === cur && T.ta === 1 && Math.abs(gl - T.gl) + Math.abs(gr - T.gr) + Math.abs(gt - T.gt) + Math.abs(gb - T.gb) < 0.5) { return; }
     // 用户自己点 / 按键换的（不是页面从外面改的）：分段开关的滑块浮着飞过去，到了再落下
     if (cfg.kind === 'seg' && T.cur && cur !== T.cur && !jump && !T.drag && liftOn() && Date.now() - T.userAt < 700) {
-      ensureLift(T); T.tup = 1; T.fly = true;
+      ensureLift(T); T.tup = 1; T.fly = true; T.S = segStops(T); quietLens(T.surf);
     }
     // 往哪边走，哪边就是前沿
     T.cl = gl < T.gl ? SP.lead : gl > T.gl ? SP.lag : SP.same;
     T.cr = gr > T.gr ? SP.lead : gr < T.gr ? SP.lag : SP.same;
     T.ct = gt < T.gt ? SP.lead : gt > T.gt ? SP.lag : SP.same;
     T.cb = gb > T.gb ? SP.lead : gb < T.gb ? SP.lag : SP.same;
+    if (T.fly) { T.cl = T.cr = SP.fly; }            // 浮着飞的是一整块玻璃：两条边一起走，不拉长
     T.gl = gl; T.gr = gr; T.gt = gt; T.gb = gb;
     T.cur = cur; T.ta = 1;
     if (jump) { T.l = gl; T.r = gr; T.t = gt; T.b = gb; T.vl = T.vr = T.vt = T.vb = 0; }
@@ -1037,6 +1076,7 @@
       T.l = T.gl; T.r = T.gr; T.t = T.gt; T.b = T.gb;
       T.a = T.ta; T.vl = T.vr = T.vt = T.vb = T.va = 0;
       T.up = T.tup = T.vup = 0; T.st = T.vst = 0; T.fly = false;
+      if (T.surf.hasAttribute('data-lg-fly')) { T.surf.removeAttribute('data-lg-fly'); segNear(T, null); }
       return false;
     }
     step(T, 'l', 'vl', T.gl, T.cl, dt); step(T, 'r', 'vr', T.gr, T.cr, dt);
@@ -1046,9 +1086,13 @@
     if (T.cfg.kind === 'seg') {
       step(T, 'up', 'vup', T.tup, T.tup ? SP.up : SP.down, dt);
       if (!held) { step(T, 'st', 'vst', 0, SP.band, dt); }
-      // 浮着飞过去的：完全浮起来、而且中心到了才落下——相邻两项之间 0.2 秒就到，不等浮起的话透镜只闪一下。
-      // （液态滑块的后沿还在追，落下那 0.26 秒里正好追上）
-      if (T.fly && !T.drag && T.up > 0.9 && Math.abs(T.l + T.r - T.gl - T.gr) < 8) { T.fly = false; T.tup = 0; segNear(T, null); }
+      // 飞的路上，离玻璃最近的那一项先变成选中的样子：选中色跟着玻璃走，而不是一点就跳到终点
+      if (T.fly && T.S && !(T.drag && T.drag.moved)) { segNear(T, nearest(T.S, (T.l + T.r) / 2).el); }
+      // 浮着飞过去的：完全浮起来、而且中心到了才落下——相邻两项之间 0.2 秒就到，不等浮起的话透镜只闪一下
+      if (T.fly && !T.drag && T.up > 0.9 && Math.abs(T.l + T.r - T.gl - T.gr) < 8) { T.fly = false; T.tup = 0; T.S = null; segNear(T, null); }
+      if (!!T.fly !== T.surf.hasAttribute('data-lg-fly')) {
+        if (T.fly) { T.surf.setAttribute('data-lg-fly', ''); } else { T.surf.removeAttribute('data-lg-fly'); }
+      }
       var moving = T.fly || Math.abs(T.up - T.tup) > 0.005 || Math.abs(T.vup) > 0.05
         || (!held && (Math.abs(T.st) > 0.0002 || Math.abs(T.vst) > 0.003));
       if (!moving) { T.up = T.tup; T.vup = 0; if (!held) { T.st = T.vst = 0; } }
@@ -1093,7 +1137,8 @@
     T.el.style.width = w.toFixed(2) + 'px';
     T.el.style.height = h.toFixed(2) + 'px';
     T.el.style.borderRadius = Math.min(rad, h / 2, w / 2).toFixed(2) + 'px';
-    T.el.style.transform = 'translate3d(' + T.l.toFixed(2) + 'px,' + T.t.toFixed(2) + 'px,0) scale(' + sx.toFixed(4) + ',' + sy.toFixed(4) + ')';
+    var at = keepIn(T.clip, T.l, T.t, w, h, sx, sy);      // 滚动容器里（侧栏菜单、命令面板列表）：回弹不许把滚动尺寸撑大
+    T.el.style.transform = 'translate3d(' + at[0].toFixed(2) + 'px,' + at[1].toFixed(2) + 'px,0) scale(' + sx.toFixed(4) + ',' + sy.toFixed(4) + ')';
     T.el.style.opacity = op.toFixed(3);
   }
 
@@ -1122,7 +1167,8 @@
    *     松手落到最近的一项；快速一甩（≥ 0.6 px/ms）往甩的方向再走一格（最多一格）。
    *   · 拖过两端：整条像橡皮筋被拉长，越拉越费劲，最多拉长轨道宽的 5%（≤ 18px）；松手弹回、略压扁一下再停。
    *     大力一甩，整条朝甩的方向形变（≤ 3.5%）再回弹。钉住的是另一端，所以是朝手指那边变形。
-   *   · 点别的项（或用键盘换选中）：滑块浮着飞过去，到了再落下。
+   *   · 点别的项（或用键盘换选中）：滑块浮着、整块飞过去（两条边同一根弹簧，不拉长），完全浮起来而且到了才落下。
+   *     路上只有这一块玻璃：悬停透镜按下就撤；选中色跟着离玻璃最近的那一项走，终点等玻璃到了才亮。
    * 选中由页面决定：拖完松手，脚本替用户「点」一下落到的那一项（element.click()），页面照常处理；
    * 紧跟在拖动后面、浏览器自己补的那一下 click 被吞掉，不然它会把选中又点回原处。
    * 透镜只平移、绝不缩放（缩放会把透过它的东西重采样得发糊）；尺寸跟着项宽变，只挪九宫格。
@@ -1484,12 +1530,13 @@
       lastX: ev.clientX, t: ev.timeStamp, v: 0, moved: false };
     dragT = T;
     T.fly = false;
+    quietLens(T.surf);
     if (it !== T.cur) {
-      // 按在别的项上（iOS 26：手指按在哪一项，玻璃就到哪一项底下）：滑块先飞到手指下面，选不选由松手时的点击交给页面
-      T.cl = at.x < T.gl ? SP.lead : SP.lag; T.cr = at.x + at.w > T.gr ? SP.lead : SP.lag;
-      T.gl = at.x; T.gr = at.x + at.w; T.cur = it;
+      // 按在别的项上（iOS 26：手指按在哪一项，玻璃就到哪一项底下）：滑块浮起、整块飞到手指下面，选不选由松手时的点击交给页面
       T.fly = liftOn();
-      segNear(T, it);
+      T.cl = at.x < T.gl ? SP.lead : SP.lag; T.cr = at.x + at.w > T.gr ? SP.lead : SP.lag;
+      if (T.fly) { T.cl = T.cr = SP.fly; T.S = S; }
+      T.gl = at.x; T.gr = at.x + at.w; T.cur = it;
     }
     if (liftOn()) { ensureLift(T); T.tup = 1; }     // 一按下就浮起来
     animate(T);
@@ -1543,6 +1590,7 @@
     // 先按落点飞过去（浮着飞，到了再落下）；页面换了选中后再对一遍，也还是这里
     T.fly = T.tup > 0;
     T.cl = to.x < T.l ? SP.lead : SP.lag; T.cr = to.x + to.w > T.r ? SP.lead : SP.lag;
+    if (T.fly) { T.cl = T.cr = SP.fly; T.S = D.S; }
     T.gl = to.x; T.gr = to.x + to.w; T.cur = to.el;
     segNear(T, to.el);
     eatClick = T.surf;

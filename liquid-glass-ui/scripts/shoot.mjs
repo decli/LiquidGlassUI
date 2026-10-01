@@ -350,9 +350,28 @@ async function segCheck() {
   if (!(s.st > 0.01 && s.st <= 0.05 + 1e-6 && /scale/.test(s.transform))) { fail('拖过左端应当整条被拉长、且有上限（≤ 5%）：' + JSON.stringify(s)); }
   await p.mouse.up(); await p.waitForTimeout(1000);
   if ((await st(p)).transform || await sel(p) !== 0) { fail('拖过两端松手：应当弹回原样、选中不变'); }
+  // 点最后一项：只有一块玻璃整块滑过去——悬停透镜不出来（它会先到终点，看着像选中「跳」过去），
+  // 选中色跟着玻璃走、依次经过中间的项，而不是一点就跳到终点
+  await p.evaluate(s => {
+    const seg = document.querySelector(s), btns = [...seg.querySelectorAll(':scope > button')];
+    window.__trip = { near: [], lens: 0 };
+    const tick = () => {
+      if (!window.__trip) { return; }
+      const n = btns.findIndex(b => b.hasAttribute('data-lg-near')), l = seg.querySelector('.lg-lens');
+      if (n >= 0 && window.__trip.near[window.__trip.near.length - 1] !== n) { window.__trip.near.push(n); }
+      if (l) { window.__trip.lens = Math.max(window.__trip.lens, parseFloat(l.style.getPropertyValue('--a') || 0)); }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, SEG);
   await p.mouse.move(B[3].x, B[3].y); await p.mouse.down(); await p.mouse.up(); await p.waitForTimeout(120);
   if (!(await st(p)).fly) { fail('点别的项：滑块应当浮着飞过去'); }
   await p.waitForTimeout(1200);
+  const trip = await p.evaluate(() => { const t = window.__trip; window.__trip = null; return t; });
+  if (trip.lens > 0.1) { fail(`点别的项：飞的时候悬停透镜不该出来（--a 最高 ${trip.lens.toFixed(2)}），不然它先到终点，看着像选中跳过去`); }
+  if (!(trip.near.indexOf(1) >= 0 && trip.near.indexOf(2) >= 0 && trip.near[trip.near.length - 1] === 3)) {
+    fail('点别的项：选中色应当跟着玻璃依次经过中间的项，实际经过 ' + JSON.stringify(trip.near));
+  }
   s = await st(p);
   if (s.fly || s.lifted || await sel(p) !== 3) { fail('点别的项：到了应当落下、选中那一项'); }
   await close(o, 'seg band');
@@ -394,6 +413,37 @@ async function segCheck() {
   if (await sel(p) !== 1) { fail('精简档：应当照样能拖着换选中'); }
   await close(o, 'seg lite');
   console.log('  分段开关：按住浮起、拖、甩、橡皮筋、点、按住别的项、玻璃导航条、精简档都过了一遍');
+}
+
+/**
+ * 滚动容器里的透镜和滑块不许把滚动尺寸撑大：撑大一个像素，滚动条就闪一下（表格最后一行：透镜回弹往下多冲 1px，
+ * 竖滚动条一出来又挤出横滚动条）。鼠标在最后两项之间来回划几次，逐帧盯着滚动尺寸。
+ */
+async function overflowCheck() {
+  const o = await open({ mode: 'full' });
+  const p = o.page;
+  for (const [name, box, items] of [['表格', '.lg-table-wrap', '.lg-table tbody tr'], ['侧栏菜单', '.lg-nav', '.lg-nav-plate:not([hidden]) .lg-nav-item']]) {
+    const n = await p.locator(items).count();
+    if (n < 2) { continue; }
+    await p.locator(box).evaluate(e => e.scrollIntoView({ block: 'center' }));
+    await p.waitForTimeout(300);
+    await p.evaluate(sel => {
+      const w = document.querySelector(sel), m = { h: w.scrollHeight, w: w.scrollWidth, h0: w.scrollHeight, w0: w.scrollWidth };
+      const tok = (window.__ov = (window.__ov || 0) + 1);
+      const t = () => { if (window.__ov !== tok) { return; } m.h = Math.max(m.h, w.scrollHeight); m.w = Math.max(m.w, w.scrollWidth); requestAnimationFrame(t); };
+      window.__ovm = m; requestAnimationFrame(t);
+    }, box);
+    const a = await p.locator(items).nth(n - 2).boundingBox(), z = await p.locator(items).nth(n - 1).boundingBox();
+    for (let k = 0; k < 5; k++) {
+      await p.mouse.move(a.x + a.width * 0.4, a.y + a.height / 2, { steps: 3 }); await p.waitForTimeout(220);
+      await p.mouse.move(z.x + z.width * 0.4, z.y + z.height / 2, { steps: 3 }); await p.waitForTimeout(320);
+    }
+    await p.mouse.move(z.x + z.width * 0.4, z.y + z.height + 60, { steps: 3 }); await p.waitForTimeout(500);
+    const m = await p.evaluate(() => { window.__ov++; return window.__ovm; });
+    if (m.h > m.h0 || m.w > m.w0) { failures.push(`滚动条：鼠标划过${name}最后一项时滚动尺寸被撑大（${m.w0}×${m.h0} → ${m.w}×${m.h}），滚动条会闪一下`); }
+  }
+  console.log('  滚动容器：表格、侧栏菜单的最后一项来回划过，滚动尺寸没被撑大');
+  await close(o, 'overflow');
 }
 
 if (!checkOnly) { await mkdir(outDir, { recursive: true }); }
@@ -490,6 +540,7 @@ if (userUrl) {
   // ── 1.6 折射与分段开关 ──
   await refractCheck();
   await segCheck();
+  await overflowCheck();
 
   if (!checkOnly) {
     // ── 2 图集 ──
