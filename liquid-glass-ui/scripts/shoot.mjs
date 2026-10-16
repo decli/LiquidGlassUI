@@ -5,7 +5,8 @@
  *   node scripts/shoot.mjs                     拍演示页的整套截图到 ./shots/，并做三档校验与一致性校验
  *                                              （每个能点的元素悬停都有反馈、都有跟着指针走的指尖光；所有玻璃同一种材质、并排的胶囊不一深一浅）、
  *                                              折射校验（玻璃正中和不折射时逐像素一样、边上确实在弯；透镜和浮起的透镜中间没有平的一块）、
- *                                              分段开关校验（按住浮起、按住别的项、拖、甩、橡皮筋、点、玻璃导航条、精简档）
+ *                                              分段开关校验（按住浮起、按住别的项、拖、甩、橡皮筋、点、玻璃导航条、精简档）、
+ *                                              1.4 的增强（品牌色、color-scheme、展开态、按下落回、凹槽、局部实色、「还在进行」）
  *   node scripts/shoot.mjs --out design        换输出目录
  *   node scripts/shoot.mjs --check             只做校验，不留截图
  *   node scripts/shoot.mjs --url http://localhost:3000/  拍你自己的页面：浅 / 深 × 三档 6 张全屏，再做同样的三档校验
@@ -67,9 +68,10 @@ const base = userUrl || `http://127.0.0.1:${srv.address().port}/demo/`;
 const failures = [];
 
 /** 开一页：先写好主题和档位（localStorage），再打开 */
-async function open({ theme = 'light', mode = 'full', w = 1440, h = 900, dpr = 1, query = '' } = {}) {
+async function open({ theme = 'light', mode = 'full', w = 1440, h = 900, dpr = 1, query = '', reduce = false } = {}) {
   // 主题三管齐下：演示页读 localStorage；按系统走的页面看 colorScheme；其余的直接在 <html> 上写 data-theme
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: dpr, colorScheme: theme === 'dark' ? 'dark' : 'light' });
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: dpr, colorScheme: theme === 'dark' ? 'dark' : 'light',
+    reducedMotion: reduce ? 'reduce' : 'no-preference' });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
@@ -195,6 +197,7 @@ async function consistencyCheck() {
   const r = await o.page.evaluate(() => {
     const bad = [], groups = {};
     document.querySelectorAll('.lg-glass').forEach(g => {
+      if (g.closest('[data-lg-solid]')) { return; }        // 局部换了实色的，本来就不模糊
       const cs = getComputedStyle(g), bs = getComputedStyle(g, '::before'), as = getComputedStyle(g, '::after');
       const who = (g.id ? '#' + g.id : '.' + [...g.classList].join('.'));
       if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || cs.backgroundImage !== 'none') { bad.push(who + ' 宿主自己画了背景：' + cs.backgroundColor); }
@@ -722,6 +725,160 @@ if (!checkOnly) { await mkdir(outDir, { recursive: true }); }
  *   DOM：完整 = 透镜在、带跟手的光；精简 = 实色（l0）、透镜在、没有光；关闭 = 实色、没有透镜、高光环为 none
  *   像素：在透镜所在的那块面板里比，任意两档至少 1% 的像素不同（肉眼能分出来的下限）
  */
+/**
+ * 1.4 版从 Solid Glass 借来的几样，各验一遍：
+ *   品牌色（setAccent 换整套、深色跟着换、亮黄上换深色字、撤掉回到样式表）、color-scheme 跟主题、
+ *   展开着菜单的胶囊一直亮着、按下落回页面（投影收回）、凹槽受光（玻璃导航条除外）、
+ *   局部实色（data-lg-solid：不透、不折射，去掉以后折射回来）、「还在进行」在动 / 跑完停下 / 减少动态效果时停下但看得出来
+ */
+async function extrasCheck() {
+  const bad = [];
+  const o = await open({ mode: 'full' });
+  const p = o.page;
+  const read = () => p.evaluate(() => {
+    const cs = getComputedStyle(document.documentElement), btn = document.getElementById('btn-save');
+    const nav = document.querySelector('.lg-nav-item[aria-selected="true"]');
+    return {
+      accent: cs.getPropertyValue('--lg-accent').trim(), scheme: cs.colorScheme,
+      btnColor: getComputedStyle(btn).color, btnBg: getComputedStyle(btn).backgroundImage, nav: getComputedStyle(nav).color,
+      style: !!document.querySelector('style[data-lg-accent]'), now: LiquidGlass.accent(),
+      pressed: (document.querySelector('#accent > [aria-pressed="true"]') || { getAttribute: () => '?' }).getAttribute('data-accent')
+    };
+  });
+  const white = s => (s.match(/\d+/g) || []).slice(0, 3).every(v => +v > 240);
+  const base = await read();
+  if (base.scheme !== 'light') { bad.push(`浅色里 color-scheme 是 ${base.scheme}`); }
+  const violet = await p.evaluate(() => LiquidGlass.palette('#7c3aed'));
+  await p.locator('#accent').scrollIntoViewIfNeeded();
+  await p.click('#accent > [data-accent="#7c3aed"]'); await p.waitForTimeout(400);
+  let r = await read();
+  if (r.accent !== violet.light['--lg-accent'] || !r.style || r.now !== '#7c3aed' || r.pressed !== '#7c3aed') {
+    bad.push(`品牌色：点「紫」以后 --lg-accent 是 ${r.accent}（应为 ${violet.light['--lg-accent']}），accent() 是「${r.now}」，<style data-lg-accent> ${r.style ? '在' : '不在'}`);
+  }
+  if (r.btnBg === base.btnBg) { bad.push('品牌色：换成紫色以后主按钮的渐变没变'); }
+  await p.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark')); await p.waitForTimeout(250);
+  r = await read();
+  if (r.accent !== violet.dark['--lg-accent']) { bad.push(`品牌色：深色里 --lg-accent 是 ${r.accent}（应为 ${violet.dark['--lg-accent']}）`); }
+  if (r.scheme !== 'dark') { bad.push(`深色里 color-scheme 是 ${r.scheme}：滚动条、下拉列表、自动填充这些浏览器画的东西还是浅色`); }
+  await p.click('#accent > [data-accent="#f5c400"]'); await p.waitForTimeout(400);
+  r = await read();
+  if (white(r.btnColor) || white(r.nav)) { bad.push(`品牌色：亮黄的主按钮 / 选中的菜单项上还是白字（按钮 ${r.btnColor}，菜单项 ${r.nav}）`); }
+  await p.click('#accent > [data-accent=""]'); await p.waitForTimeout(400);
+  r = await read();
+  if (r.style || r.now !== '' || r.accent !== '#4d8ef5' || !white(r.btnColor)) {
+    bad.push(`品牌色：点回「蓝」以后没回到样式表里的那一套（--lg-accent ${r.accent}，<style> ${r.style ? '还在' : '撤了'}，按钮字 ${r.btnColor}）`);
+  }
+  await p.evaluate(() => document.documentElement.setAttribute('data-theme', 'light')); await p.waitForTimeout(250);
+
+  // 展开着菜单的胶囊：指针移进菜单以后，胶囊还亮着、小箭头朝上
+  await p.evaluate(() => scrollTo(0, 0));
+  await p.mouse.move(1436, 880); await p.waitForTimeout(300);
+  const chipLook = () => p.evaluate(() => {
+    const c = document.getElementById('ws-chip');
+    return { sh: getComputedStyle(c).boxShadow, caret: getComputedStyle(c.querySelector('.lg-chip-caret')).transform };
+  });
+  const rest = await chipLook();
+  await p.click('#ws-chip'); await p.waitForTimeout(500);
+  const mi = await p.locator('#ws-menu .lg-menu-item').first().boundingBox();
+  await p.mouse.move(mi.x + 40, mi.y + mi.height / 2, { steps: 4 }); await p.waitForTimeout(600);
+  const held = await chipLook();
+  if (held.sh === rest.sh) { bad.push('展开态：工作区菜单开着、指针移进菜单以后，胶囊和平时一样（看不出是谁打开的菜单）'); }
+  if (!/^matrix\(-1/.test(held.caret)) { bad.push(`展开态：菜单开着时胶囊的小箭头没转过来（${held.caret}）`); }
+  await p.keyboard.press('Escape'); await p.mouse.click(1000, 880); await p.waitForTimeout(300);
+
+  // 按下落回页面：悬停时投影加深，按下时收回到平时
+  const btn = p.locator('#btn-clear');
+  await btn.scrollIntoViewIfNeeded();
+  await p.mouse.move(1436, 880); await p.waitForTimeout(350);
+  const sh0 = await btn.evaluate(e => getComputedStyle(e).boxShadow);
+  const bb = await btn.boundingBox();
+  await p.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2, { steps: 4 }); await p.waitForTimeout(450);
+  const sh1 = await btn.evaluate(e => getComputedStyle(e).boxShadow);
+  await p.mouse.down(); await p.waitForTimeout(350);
+  const sh2 = await btn.evaluate(e => getComputedStyle(e).boxShadow);
+  await p.mouse.up();
+  if (sh1 === sh0) { bad.push('按钮悬停时投影没有加深'); }
+  if (sh2 !== sh0) { bad.push('按下按钮时投影没有收回到平时（按下是落回页面上）'); }
+
+  // 凹槽受光：槽和输入框带「上唇阴影 + 下唇亮线」，浮起来的玻璃导航条不带
+  const g = await p.evaluate(() => [
+    getComputedStyle(document.querySelector('.lg-seg:not(.lg-glass)')).boxShadow,
+    getComputedStyle(document.querySelector('.lg-field')).boxShadow,
+    getComputedStyle(document.querySelector('.lg-seg--glass')).boxShadow
+  ]);
+  if ((g[0].match(/inset/g) || []).length < 2 || (g[1].match(/inset/g) || []).length < 2) { bad.push(`凹槽：分段开关的槽 / 输入框没有上唇阴影 + 下唇亮线（${g[0]}；${g[1]}）`); }
+  if (/inset/.test(g[2])) { bad.push('凹槽：玻璃导航条被画成了槽（它是浮起来的玻璃）'); }
+
+  // 局部实色：保存条写上 data-lg-solid → 不模糊、不折射；去掉 → 折射回来。演示页的「实色」开关同理
+  const st = sel => p.evaluate(s => {
+    const e = document.querySelector(s), bs = getComputedStyle(e, '::before');
+    return { on: e.hasAttribute('data-lg-refract-on'), bf: bs.backdropFilter || bs.webkitBackdropFilter };
+  }, sel);
+  const BAR = '.lg-toolbar--sticky';
+  const s0 = await st(BAR);
+  await p.evaluate(s => document.querySelector(s).setAttribute('data-lg-solid', ''), BAR); await p.waitForTimeout(300);
+  const s1 = await st(BAR);
+  await p.evaluate(s => document.querySelector(s).removeAttribute('data-lg-solid'), BAR); await p.waitForTimeout(300);
+  const s2 = await st(BAR);
+  if (!s0.on) { bad.push('局部实色：保存条一开始就没折射（前提不成立）'); }
+  if (s1.on || s1.bf !== 'none') { bad.push(`局部实色：写上 data-lg-solid 以后还在折射或模糊（${s1.bf}）`); }
+  if (!s2.on || s2.bf === 'none') { bad.push('局部实色：去掉 data-lg-solid 以后折射没回来'); }
+  await p.locator('#lab-solid').scrollIntoViewIfNeeded();
+  await p.click('#lab-solid > [data-solid="1"]'); await p.waitForTimeout(400);
+  const d1 = await st('#drop');
+  await p.click('#lab-solid > [data-solid=""]'); await p.waitForTimeout(400);
+  const d2 = await st('#drop');
+  if (d1.on || d1.bf !== 'none' || !d2.on) { bad.push(`局部实色：演示页的「实色 / 透光」开关不起作用（实色时 ${JSON.stringify(d1)}，透光时 ${JSON.stringify(d2)}）`); }
+
+  // 「还在进行」：平时不动（页面上不常驻转圈的东西）；点「再跑一次」：先连接（不知道多久）→ 导出（扫光）→ 停下、点变绿
+  const anim = () => p.evaluate(() => {
+    const bar = document.getElementById('task-bar');
+    return {
+      bar: getComputedStyle(bar.firstElementChild).animationName, sweep: getComputedStyle(bar.firstElementChild, '::after').animationName,
+      dots: getComputedStyle(document.querySelector('#task-dots > span')).animationName,
+      shimmer: getComputedStyle(document.getElementById('task-text')).animationName,
+      ping: getComputedStyle(document.getElementById('task-dot'), '::after').animationName,
+      busy: bar.getAttribute('aria-busy'), dot: getComputedStyle(document.getElementById('task-dot')).backgroundColor
+    };
+  });
+  const still = a => a.bar === 'none' && a.sweep === 'none' && a.shimmer === 'none' && a.ping === 'none';
+  const a0 = await anim();
+  if (!still(a0)) { bad.push(`还在进行：没在跑的时候也在动（${JSON.stringify(a0)}）——一直转着的东西会让上面的玻璃每帧重算`); }
+  await p.locator('#task-run').scrollIntoViewIfNeeded();
+  await p.click('#task-run'); await p.waitForTimeout(400);
+  const a1 = await anim();
+  if (a1.bar !== 'lg-indeterminate' || a1.dots !== 'lg-blink' || a1.shimmer !== 'lg-shimmer' || a1.ping !== 'lg-ping' || a1.busy !== 'true') {
+    bad.push(`还在进行：连接时（不知道要多久）应当一段来回走、三个点在闪、字在扫光、状态点在转：${JSON.stringify(a1)}`);
+  }
+  await p.waitForTimeout(1500);
+  const a2 = await anim();
+  if (a2.sweep !== 'lg-sweep' || a2.bar !== 'none') { bad.push(`还在进行：导出时进度条上应当有一道光扫过、不再来回走：${JSON.stringify(a2)}`); }
+  await p.waitForTimeout(3200);
+  const a3 = await anim();
+  if (!still(a3) || a3.busy !== 'false') { bad.push(`还在进行：跑完以后还在动（${JSON.stringify(a3)}）`); }
+  if (!/^rgb\(78, 168, 117\)/.test(a3.dot)) { bad.push(`还在进行：跑完以后状态点没变绿（${a3.dot}）`); }
+  await close(o, 'extras');
+
+  // 减少动态效果：都停下，但「还在进行」照样看得出来（点全亮、字看得见、不知道多久的进度条铺满一层）
+  const q = await open({ mode: 'full', reduce: true });
+  await q.page.locator('#task-run').scrollIntoViewIfNeeded();
+  await q.page.click('#task-run'); await q.page.waitForTimeout(400);
+  const rm = await q.page.evaluate(() => {
+    const dot = document.querySelector('#task-dots > span'), bar = document.getElementById('task-bar');
+    return { anim: getComputedStyle(dot).animationName, op: getComputedStyle(dot).opacity, bar: getComputedStyle(bar.firstElementChild).animationName,
+      shimmer: getComputedStyle(document.getElementById('task-text')).color, busy: bar.getAttribute('aria-busy'),
+      fill: bar.firstElementChild.getBoundingClientRect().width / bar.getBoundingClientRect().width };
+  });
+  if (rm.busy !== 'true') { bad.push('减少动态效果：点「再跑一次」没跑起来'); }
+  if (rm.anim !== 'none' || rm.op !== '1' || rm.bar !== 'none') { bad.push(`减少动态效果：三个点还在闪 / 没有全亮，或进度条还在来回走（${JSON.stringify(rm)}）`); }
+  if (/rgba\(0, 0, 0, 0\)|transparent/.test(rm.shimmer)) { bad.push('减少动态效果：「正在……」那句字是透明的（扫光关了，字也没了）'); }
+  if (rm.fill < 0.98) { bad.push(`减少动态效果：不知道要多久的进度条只铺了 ${(rm.fill * 100).toFixed(0)}%，看着像真有进度`); }
+  await close(q, 'extras reduced-motion');
+
+  bad.forEach(b => failures.push('1.4 增强：' + b));
+  console.log(`  1.4 增强：品牌色（换色、深色、亮黄换深色字、撤回）、color-scheme、展开态、按下落回、凹槽、局部实色、「还在进行」与减少动态效果${bad.length ? `，${bad.length} 处不对` : '都对'}`);
+}
+
 async function modeCheck({ target, clip, thumb = false, refract = false, save = false }) {
   const bufs = {};
   for (const mode of ['full', 'lite', 'off']) {
@@ -812,6 +969,7 @@ if (userUrl) {
   await overflowCheck();
   await scrollbarCheck();
   await importCheck();
+  await extrasCheck();
 
   if (!checkOnly) {
     // ── 2 图集 ──
@@ -861,6 +1019,13 @@ if (userUrl) {
         await p.mouse.move((b[0].x + b[1].x) / 2 + 30, b[0].y, { steps: 14 });
         await p.waitForTimeout(500);
       }, null, async p => { const b = await p.locator('.demo-phone').boundingBox(); return { x: b.x, y: b.y + b.height - 130, width: b.width, height: 130 }; }]),
+      ...[['light', '#7c3aed', 'accent@2x.png'], ['dark', '#f5c400', 'accent-dark@2x.png']].map(([theme, color, file]) => [file, { dpr: 2, theme }, async p => {
+        // 品牌色：换一个颜色，主按钮、进度条、选中的分段都跟着换；亮黄上换成深色字
+        await p.locator('#accent').evaluate(e => e.closest('.lg-card').scrollIntoView({ block: 'center' }));
+        await p.click(`#accent > [data-accent="${color}"]`);
+        await p.click('#task-run');                 // 导出跑到三成左右：状态点在转、字在扫光、进度条上一道光
+        await p.mouse.move(1436, 4); await p.waitForTimeout(2300);
+      }, null, async p => { const b = await p.locator('#accent').evaluate(e => { const r = e.closest('.lg-card').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }); return { x: b.x - 12, y: b.y - 12, width: b.width + 24, height: b.height + 24 }; }]),
       ['login.png', { query: '?view=login' }, async p => { await p.waitForTimeout(300); }],
       ['login-dark.png', { theme: 'dark', query: '?view=login' }, async p => { await p.waitForTimeout(300); }]
     ];

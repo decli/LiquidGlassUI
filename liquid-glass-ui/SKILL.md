@@ -4,7 +4,8 @@ license: MIT
 description: >-
   把网页界面做成 Apple Liquid Glass（液态玻璃）风格的完整套件与方法：可直接拷用、零依赖的 CSS + ES5 脚本
   （背景模糊 + 照 iOS 26 的边缘折射——边上放大、带一点色散，正中原样、会流动的透镜悬停、液态滑块、
-  分段开关按住浮起成一块会折射的透镜并能拖 / 橡皮筋 / 甩、指尖光、玻璃提示、HDR 高光、完整/精简/关闭三档与自动降级），
+  分段开关按住浮起成一块会折射的透镜并能拖 / 橡皮筋 / 甩、指尖光、玻璃提示、HDR 高光、完整/精简/关闭三档与自动降级、
+  一个颜色推出整套品牌色、进度条与加载状态），
   外加定稿的设计规范、技术原理、踩坑清单、多轮评审的设计决策，以及静态检查与真浏览器截图校验脚本。
   只要用户提到 Liquid Glass、液态玻璃、毛玻璃、玻璃拟态、glassmorphism、frosted glass、backdrop-filter、
   iOS 26 / macOS 26 风格、苹果风侧栏，或者想给后台、控制台、管理工具、仪表盘、登录页「换一套更有质感 / 更像苹果的外观」，
@@ -31,14 +32,15 @@ description: >-
 | `assets/liquid-glass.js` | ES5 交互层（通用模块：`<script>` / CommonJS / 打包工具都能用，服务端渲染时是不报错的替身）：分档、折射（九宫格位移贴图 + 滤镜链）、透镜、液态滑块、分段开关的浮起与拖动、指尖光、玻璃提示、HDR | 拷进项目 |
 | `assets/liquid-glass.mjs`、`assets/liquid-glass.d.ts` | ES 模块入口、TypeScript 类型 | 项目用 ES 模块 / TypeScript 时一起拷 |
 | `assets/demo/index.html` | 完整的演示页（侧栏、页头、表单、分段、表格、弹出菜单、命令面板、登录页、折射演示） | **写标记前先打开看、照抄结构** |
-| `scripts/check.mjs` | 静态检查：ES5、不改 class、令牌一致、类名没拼错（只要 Node） | 改过 CSS / JS 之后 |
+| `scripts/check.mjs` | 静态检查：ES5、不改 class、令牌一致、类名没拼错、品牌色推导（只要 Node） | 改过 CSS / JS 之后 |
 | `scripts/shoot.mjs` | 真浏览器截图 + 三档可区分校验（要 Playwright） | 交付前；给用户看效果 |
+| `scripts/accent.mjs` | 一个颜色 → 浅深两套主色令牌的 CSS（同 `LiquidGlass.setAccent`；`--report` 列对比度） | 用户要换品牌色时 |
 | `scripts/displacement_map.py` | 离线生成位移贴图 / 固定尺寸元素的完整 SVG 滤镜；`--selftest`（不折叠、正中不动、九宫格拼回去一样） | 调折射参数、做不带脚本的静态折射 |
 | `scripts/hdr_png.py` | 生成 HDR 高光贴片（16 位 PNG + cICP） | 换高光形状、核对内嵌的那张 |
 | `references/design-spec.md` | 定稿的设计规范：令牌、每个组件的尺寸、动效参数、三档定义 | 做任何视觉决定时 |
 | `references/integration.md` | 接入指南：组件类、data 属性、配置、接口、框架、CSP、检查清单 | 接进项目时 |
 | `references/principles.md` | 技术原理：玻璃怎么搭、折射的位移曲线与滤镜链、九宫格、HDR、弹簧、分段开关的浮起与拖动、分档、背景根 | 改算法或解释原理时 |
-| `references/pitfalls.md` | 43 个「不报错、只是静静地坏掉」的坑，按症状查 | 出现诡异现象时先查 |
+| `references/pitfalls.md` | 48 个「不报错、只是静静地坏掉」的坑，按症状查 | 出现诡异现象时先查 |
 | `references/design-decisions.md` | 每轮评审指出了什么、为什么这样改 | 用户想改风格、或你想「改回」某个做法之前 |
 
 ## 工作流程
@@ -55,20 +57,24 @@ description: >-
 1. 引入，按项目的形态选一种（`references/integration.md` §1）：
    - **普通页面 / 服务端模板**：把 `assets/liquid-glass.css`、`assets/liquid-glass.js` 拷进项目静态目录（保留文件头注释），
      `<head>` 里一个 `<link>`、一个 `<script>`——脚本放 `<head>` 时自己会在页面画出来之前写好档位，不用再加内联脚本。
-   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.3.0`（用户能访问这个仓库时），
+   - **有打包工具的前端工程**（Vite、webpack、Next.js、Nuxt）：`npm i github:decli/LiquidGlassUI#v1.4.0`（用户能访问这个仓库时），
      入口里 `import 'liquid-glass-ui/liquid-glass.css'` + `import LiquidGlass from 'liquid-glass-ui'`；访问不了就把 assets 下四个文件拷进项目，
      照样 import 相对路径。要改配置在 import 之后调 `LiquidGlass.init({ … })`。服务端渲染时 import 不会报错，不用 `typeof window` 判断。
 2. 不要在组件里初始化、也不要在路由切换后调什么：脚本用 `MutationObserver` 自己发现变化。`init()` 整页一份，只在启动时调。
 3. 按 `assets/demo/index.html` 的结构给页面元素套组件类。凡是玻璃都带 `.lg-glass`，再加具体组件类
    （`.lg-sidebar`、`.lg-chip`、`.lg-menu`、`.lg-panel`、`.lg-toolbar`、`.lg-dialog`……）。完整列表见 integration.md §2。
 4. 自己的结构用 data 属性接：`data-lg-lens`（透镜）、`data-lg-slider`（液态滑块）、`data-lg-refract`（折射）、
-   `data-lg-hdr`、`data-lg-tip`、`data-lg-glow`、`data-lg-mode-set`（三档开关）。见 integration.md §3。
-5. 选中、收起这些状态由页面用 `aria-selected` / `aria-pressed` / `aria-checked` / `aria-current` / `hidden` 表达；
+   `data-lg-hdr`、`data-lg-tip`、`data-lg-glow`、`data-lg-mode-set`（三档开关）、`data-lg-solid`（局部换实色）。见 integration.md §3。
+5. 选中、收起这些状态由页面用 `aria-selected` / `aria-pressed` / `aria-checked` / `aria-current` / `hidden` 表达
+   （打开菜单的胶囊 / 按钮写 `aria-haspopup` + `aria-expanded`，开着时它会一直亮着）；
    脚本只看不改，透镜和滑块自己跟过去，不需要通知它。页面原来用自己的类标选中（`.on`、`.active`）时，
    在切换处顺手补上 `aria-*`（推荐），或者在 `LiquidGlassConfig.on` 里写上那个类。
    侧栏用 `<a>` 链接、表格没有 `<thead>`、一行筛选条件、窄屏这些情况见 integration.md §2 与 §7。
 6. 放一个三档开关（完整 / 精简 / 关闭），通常在侧栏底部或设置页。
-7. 品牌色不是蓝色时，只改 design-spec.md §3.2 列出的那几个令牌（浅深两套）。
+7. 品牌色不是蓝色时，**不要手改令牌**：`node scripts/accent.mjs '#品牌色' > brand.css` 生成一段 CSS 放在 `liquid-glass.css` 后面
+   （或者配置里写 `accent: '#品牌色'` / 运行时 `LiquidGlass.setAccent()`）。浅深两套主色由它推出来，字和按钮上的字都压得住（principles.md §11）。
+8. 有「正在处理」的地方用 `.lg-progress`（`aria-busy`、`aria-valuenow`）、`.lg-dots`、`.lg-shimmer`、`.lg-dot--busy`——
+   只在真的在进行时挂上，完了撤掉、换成结果的颜色；不要在页面上常驻一个转圈的东西（会折射的玻璃底下每帧都要重算）。
 
 ### 3. 验证（交付前都要跑）
 
@@ -114,7 +120,11 @@ node scripts/shoot.mjs --url http://localhost:8080/ [--key 你的档位存储键
 - **「在 React / Vue / Next.js 里用」**：入口里 import 样式和脚本各一次即可（服务端渲染安全），状态用 `aria-*` 表达；见 integration.md §1 B 与 §9。
 - **「封装成库给别的项目用」**：已经是了——仓库根的 `package.json` 让 `npm i github:decli/LiquidGlassUI` 直接可用，
   包里只有 `liquid-glass.css / .js / .mjs / .d.ts` 四个文件；不要再包一层类或组件，接口就是全局的 `LiquidGlass`（integration.md §6）。
-- **「换成别的品牌色 / 暗色为主」**：只改令牌；改完跑 `check.mjs`（它会核对两块深色令牌一致）。
+- **「换成别的品牌色」**：`node scripts/accent.mjs '#品牌色' --report`，把输出的 CSS 放在 `liquid-glass.css` 后面引入，把对比度那两行告诉用户
+  （亮黄、亮绿这类按钮上会换成深色字、字的颜色会压暗——这是对比度要求，不是 bug）。要让最终用户自己挑颜色：`LiquidGlass.setAccent(颜色)`。
+- **「暗色为主」**：`<html data-theme="dark">`；`color-scheme` 已经跟着主题，滚动条、下拉列表不用另管。
+- **「加载中 / 进度条 / 任务在跑」**：`.lg-progress` 等（design-spec.md §5.6）。动只说「还没完」，完了停下、用绿 / 红说结果。
+- **「这块玻璃背后是图，但里面字很多，读着累」**：给那块（或它的容器）写 `data-lg-solid`——不透、不折射，边上的光和投影照旧。
 - **「要 iOS 26 那样的底部导航条」**：`<nav class="lg-glass lg-seg lg-seg--glass">`，项是 `<button aria-pressed>` 里一个图标 + 一个 `<span>`，
   粘在能滚的内容底部（integration.md §7.3）；无头截图里矮条看着没模糊是无头浏览器的问题（pitfalls.md #34），要在实机上看。
 - **「要 iOS 26 标签栏那种按住浮起、能拖的选项」**：直接用 `.lg-seg`（或 `data-lg-slider` + `data-lg-kind="seg"`），已经带了；

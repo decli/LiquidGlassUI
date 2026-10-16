@@ -70,6 +70,22 @@ export interface LiquidGlassOptions {
   tips?: string;
   /** 哪些元素写指尖光的 --mx / --my（整串替换） */
   glow?: string;
+  /** 品牌色（'#7c3aed' / 'rgb(124, 58, 237)'）：浅深两套主色令牌由它推出来，同 setAccent()；null 回到样式表里的蓝 */
+  accent?: string | null;
+  /** 内容安全策略的 nonce：setAccent 插的 <style> 带上它 */
+  nonce?: string;
+}
+
+/** 一套主题里的主色令牌：--lg-accent、--lg-accent-hover、--lg-on-accent、--lg-ring、--lg-accent-glass、--lg-pro-top、--lg-pro-bot、--lg-pro-glow（浅色还有 --lg-sec-glow） */
+export type AccentTokens = Record<string, string>;
+/** palette() 的结果 */
+export interface AccentPalette {
+  /** 规整过的输入色（#rrggbb） */
+  color: string;
+  light: AccentTokens;
+  dark: AccentTokens;
+  /** 能直接贴在 liquid-glass.css 后面的一段 CSS（浅色、显式深色、跟随系统的深色三块） */
+  css: string;
 }
 
 export interface LiquidGlassApi {
@@ -88,6 +104,12 @@ export interface LiquidGlassApi {
   describe(): string;
   /** 弹一句玻璃浮动提示 */
   notify(text: string): void;
+  /** 一个颜色 → 浅深两套主色令牌和一段 CSS；纯函数，服务端渲染时也能用。认不出的颜色返回 null */
+  palette(color: string): AccentPalette | null;
+  /** 换品牌色；null / '' 回到样式表里的那一套。认不出的颜色什么都不改，返回 null */
+  setAccent(color: string | null): AccentPalette | null;
+  /** 现在的品牌色（#rrggbb），没换过是 '' */
+  accent(): string;
 }
 
 declare const LiquidGlass: LiquidGlassApi;
@@ -100,5 +122,6 @@ declare global {
   }
   interface DocumentEventMap {
     'lg:modechange': CustomEvent<{ mode: LiquidGlassMode; tier: LiquidGlassTier }>;
+    'lg:accentchange': CustomEvent<{ color: string | null }>;
   }
 }

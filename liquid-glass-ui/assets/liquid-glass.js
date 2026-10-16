@@ -1,11 +1,11 @@
 /*!
- * Liquid Glass UI —— 交互层 v1.3.0
+ * Liquid Glass UI —— 交互层 v1.4.0
  *
  * 只管「看着像玻璃、摸着像水」，不碰业务：不发请求、不改表单、不改页面元素的 class。
  * 删掉这个 <script>，页面照样能用——liquid-glass.css 里有不带脚本的退路。
  * 原理、参数怎么来的、踩过的坑，见 references/ 下的文档。
  *
- * 做的八件事：
+ * 做的几件事：
  *   1 分档：用户选的三档（完整 / 精简 / 关闭，没选过是「自动」）写在 <html data-lg-mode>，
  *     材质档写在 <html data-lg-tier>：l0 实色 / l1 模糊 / l2 模糊 + 折射 / l3 再加 HDR 高光。
  *   2 折射：照 iOS 26 的玻璃边——边上放大（加一点色散），正中一个像素都不动。
@@ -16,6 +16,8 @@
  *   5 指尖光：玻璃按钮上跟着指针走的一小团光（只写 CSS 变量 --mx / --my）。
  *   6 玻璃提示：把 title 小黄框换成玻璃气泡，离开时原样放回（读屏照样读得到）。
  *   7 HDR 高光：HDR 屏上玻璃上沿一道比页面白更亮的光。
+ *   8 品牌色：给一个颜色，在 OKLCH 里推出浅深两套主色令牌（§0，纯函数；setAccent 插一段 <style> 换上去）。
+ *     写了 data-lg-solid 的区域不折射（那里的玻璃换成实色）。
  *
  * 引入（详见 references/integration.md §1）：
  *   · 页面里 <script src="liquid-glass.js"> 一行（配一行 liquid-glass.css）：自己跑起来，全局有 LiquidGlass；
@@ -48,15 +50,132 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (win, doc) {
   'use strict';
 
+  /* ══ 0 品牌色：一个颜色推导整套主色令牌（浅深两套） ═══════════════════════════
+   *
+   * 换品牌色原来要手改 9 个令牌 × 浅深两套，还得自己算白字压不压得住。这里只要一个颜色：
+   * 在 OKLCH 里保留它的色相，明度、彩度照默认那套蓝（#2f6fe0）和各个令牌的关系推出来——
+   * 所以默认的蓝推出来就是样式表里那一套（scripts/check.mjs 会核对）。三条兜底：
+   *   · 字的颜色（--lg-accent）在卡片底上 ≥ 4.5:1，不够就压暗（浅色）/ 提亮（深色）；
+   *   · 主按钮（--lg-pro-top / -bot）保留品牌色的明度。上面的白字够得上默认蓝的水平（渐变正中浅 4.2:1、深 3.5:1）
+   *     就用白字；差一点（压暗不超过 0.08 就够）就压暗一点；差得多（亮黄、亮绿这类）保留按钮的亮度、换深色字（≥ 4.5:1）；
+   *   · 屏幕显示不出来的颜色只减彩度、不动明度和色相（直接截断会偏色）。
+   * 纯函数，不碰页面：服务端渲染、Node 里（scripts/accent.mjs）照样能算。
+   */
+  function srgbLin(c) { c = c / 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  function linSrgb(c) { return 255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055); }
+  /** '#rgb' / '#rrggbb' / 'rgb(r, g, b)' → [r, g, b]；认不出返回 null */
+  function parseColor(s) {
+    var t = String(s == null ? '' : s), m = /^\s*#([0-9a-f]{3}|[0-9a-f]{6})\s*$/i.exec(t), h;
+    if (m) {
+      h = m[1].length === 3 ? m[1].replace(/(.)/g, '$1$1') : m[1];
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+    }
+    m = /^\s*rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)\s*(?:[,/]\s*[\d.]+%?\s*)?\)\s*$/i.exec(t);
+    return m ? [Math.round(clamp(+m[1], 0, 255)), Math.round(clamp(+m[2], 0, 255)), Math.round(clamp(+m[3], 0, 255))] : null;
+  }
+  /** sRGB → OKLCH [明度 0–1, 彩度, 色相°] */
+  function toOklch(c) {
+    var r = srgbLin(c[0]), g = srgbLin(c[1]), b = srgbLin(c[2]);
+    var l = Math.pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1 / 3);
+    var m = Math.pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1 / 3);
+    var s = Math.pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1 / 3);
+    var A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, Math.sqrt(A * A + B * B), (Math.atan2(B, A) * 180 / Math.PI + 360) % 360];
+  }
+  /** OKLCH → sRGB（0–255，可能出界） */
+  function fromOklch(L, C, H) {
+    var a = C * Math.cos(H * Math.PI / 180), b = C * Math.sin(H * Math.PI / 180);
+    var l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b, 3), m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b, 3),
+      s = Math.pow(L - 0.0894841775 * a - 1.2914855480 * b, 3);
+    return [linSrgb(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+      linSrgb(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+      linSrgb(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s)];
+  }
+  function inGamut(c) { return c[0] > -0.5 && c[0] < 255.5 && c[1] > -0.5 && c[1] < 255.5 && c[2] > -0.5 && c[2] < 255.5; }
+  /** OKLCH → 屏幕上显示得出来的 sRGB：出界时二分着减彩度 */
+  function ink(L, C, H) {
+    L = clamp(L, 0, 1);
+    var c = fromOklch(L, C, H), lo = 0, hi = C, i, t;
+    if (!inGamut(c)) {
+      for (i = 0; i < 24; i++) { t = (lo + hi) / 2; if (inGamut(fromOklch(L, t, H))) { lo = t; } else { hi = t; } }
+      c = fromOklch(L, lo, H);
+    }
+    return [Math.round(clamp(c[0], 0, 255)), Math.round(clamp(c[1], 0, 255)), Math.round(clamp(c[2], 0, 255))];
+  }
+  /** WCAG 对比度 */
+  function contrast(a, b) {
+    var x = 0.2126 * srgbLin(a[0]) + 0.7152 * srgbLin(a[1]) + 0.0722 * srgbLin(a[2]);
+    var y = 0.2126 * srgbLin(b[0]) + 0.7152 * srgbLin(b[1]) + 0.0722 * srgbLin(b[2]);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+  function hexOf(c) { return '#' + ((1 << 24) + (c[0] << 16) + (c[1] << 8) + c[2]).toString(16).slice(1); }
+  function rgbaOf(c, a) { return 'rgba(' + c[0] + ', ' + c[1] + ', ' + c[2] + ', ' + String(a).replace(/^0\./, '.') + ')'; }
+
+  /** 一套主题（浅 / 深）里的主色令牌。数都是从默认的蓝量出来的：各令牌与它的明度差、彩度比 */
+  function accentTokens(o, dark) {
+    var L = o[0], C = o[1], H = o[2], white = [255, 255, 255], t = {}, i;
+    var surf = dark ? [26, 31, 38] : white;                    // --lg-surface：字落在卡片上
+    // 字的颜色：浅色就是品牌色本身，深色提亮 0.09；对比度不够再接着压暗 / 提亮
+    var aL = dark ? Math.min(L + 0.09, 0.88) : L, aC = dark ? C * 0.91 : C, a = ink(aL, aC, H);
+    for (i = 0; i < 200 && contrast(a, surf) < 4.5; i++) { aL += dark ? 0.005 : -0.005; a = ink(aL, aC, H); }
+    // 主按钮：渐变正中比品牌色亮 0.023（深色 0.067），上下各差 0.046（深色 0.05），下沿彩度多一点；
+    // 正中最亮 0.85——再亮，上沿就白成一片，看不出是这个颜色
+    var f0 = Math.min(L + (dark ? 0.067 : 0.023), 0.85), fL = f0, fC = C * (dark ? 0.933 : 0.98);
+    var d = dark ? 0.0505 : 0.0458, k = dark ? 0.074 : 0.056, want = dark ? 3.5 : 4.2;
+    var deep = ink(0.22, Math.min(C * 0.25, 0.04), H), top, bot, mid, on = white;
+    var fill = function () {
+      top = ink(fL + d, fC * (1 - k), H); bot = ink(fL - d, fC * (1 + k), H);
+      mid = [Math.round((top[0] + bot[0]) / 2), Math.round((top[1] + bot[1]) / 2), Math.round((top[2] + bot[2]) / 2)];
+    };
+    fill();
+    for (i = 0; i < 200 && contrast(white, mid) < want; i++) { fL -= 0.005; fill(); }
+    if (f0 - fL > 0.08) {                                       // 白字要压暗太多：先看保留原来的亮度、换深色字行不行
+      var keep = fL;
+      fL = f0; fill();
+      if (contrast(deep, mid) >= 4.5) { on = deep; } else { fL = keep; fill(); }
+    }
+    t['--lg-accent'] = hexOf(a);
+    t['--lg-accent-hover'] = hexOf(dark ? ink(aL + 0.08, aC * 0.75, H) : ink(aL - 0.103, aC * 0.92, H));
+    t['--lg-on-accent'] = hexOf(on);
+    t['--lg-ring'] = rgbaOf(a, dark ? 0.32 : 0.24);
+    t['--lg-accent-glass'] = rgbaOf(a, dark ? 0.17 : 0.11);
+    t['--lg-pro-top'] = hexOf(top);
+    t['--lg-pro-bot'] = hexOf(bot);
+    t['--lg-pro-glow'] = rgbaOf(mid, dark ? 0.45 : 0.5);
+    if (!dark) { t['--lg-sec-glow'] = rgbaOf(mid, 0.13); }     // 深色里白按钮的指尖光是白的，不跟品牌色
+    return t;
+  }
+  function cssRule(sel, t, pad) {
+    var out = pad + sel + ' {\n', k;
+    for (k in t) { if (Object.prototype.hasOwnProperty.call(t, k)) { out += pad + '  ' + k + ': ' + t[k] + ';\n'; } }
+    return out + pad + '}\n';
+  }
+  /**
+   * 一个颜色 → { color, light, dark, css }：浅深两套令牌，和一段能直接贴在 liquid-glass.css 后面的 CSS
+   * （选择器写成 html:root，比样式表里的 :root 具体，贴在哪儿都盖得住）。认不出的颜色返回 null
+   */
+  function palette(color) {
+    var rgb = parseColor(color);
+    if (!rgb) { return null; }
+    var o = toOklch(rgb), light = accentTokens(o, false), dark = accentTokens(o, true);
+    return {
+      color: hexOf(rgb), light: light, dark: dark,
+      css: cssRule('html:root', light, '') + cssRule('html:root[data-theme="dark"]', dark, '')
+        + '@media (prefers-color-scheme: dark) {\n'
+        + cssRule('html:root:not([data-theme="light"]):not([data-theme="dark"])', dark, '  ') + '}\n'
+    };
+  }
+
   /**
    * 什么都不做的替身：服务端渲染（没有 window / document）、太老的浏览器（样式表的降级规则兜底）。
    * 方法都在、都不报错，调用方不用先判断「能不能用」
    */
   function inert() {
     var self = {
-      version: '1.3.0', supported: false,
+      version: '1.4.0', supported: false,
       init: function () { return self; }, mode: function () { return 'off'; }, tier: function () { return 'l0'; },
-      setMode: function () {}, refresh: function () {}, describe: function () { return ''; }, notify: function () {}
+      setMode: function () {}, refresh: function () {}, describe: function () { return ''; }, notify: function () {},
+      palette: palette, setAccent: function (c) { return c == null || c === '' ? null : palette(c); }, accent: function () { return ''; }
     };
     return self;
   }
@@ -537,6 +656,8 @@
     }
     return false;
   }
+  /** 这块玻璃不折射：隔着背景根，或者在 data-lg-solid 的区域里（那里的玻璃换成实色，折了也看不出来，白花显卡） */
+  function noRefract(el) { return !!el.closest('[data-lg-solid]') || isolated(el); }
 
   /**
    * 一块玻璃的折射强度。预设里写的直接用；data-lg-refract="边宽 [最外缘位移]" 照写的用
@@ -578,7 +699,7 @@
   function refreshRefract(el) {
     var R = el.__lgR;
     if (!R) { return; }
-    if (!refracting() || isolated(el)) {
+    if (!refracting() || noRefract(el)) {
       if (el.hasAttribute('data-lg-refract-on')) { el.removeAttribute('data-lg-refract-on'); }
       return;
     }
@@ -979,7 +1100,7 @@
    * 而折射的元素绝不能缩放（一缩放，透过它的东西就被重采样得发糊），所以只在停稳、没有缩放的时候开。
    */
   function lensMap(L) {
-    if (!L.ref || !refracting() || L.el.hasAttribute('data-onsel') || isolated(L.surf)) { return; }
+    if (!L.ref || !refracting() || L.el.hasAttribute('data-onsel') || noRefract(L.surf)) { return; }
     if (!L.F) { L.F = newFilter(0.06); L.ref.style.setProperty('--lg-ref', 'url(#' + L.F.id + ')'); }
     var w = Math.round(L.pw != null ? L.pw : L.w), h = Math.round(L.ph != null ? L.ph : L.h);   // 画出来的尺寸（可能被关进滚动范围时收过）
     if (w < 8 || h < 8) { return; }
@@ -1286,7 +1407,7 @@
    */
   function ensureLift(T) {
     var Z = T.lz;
-    if (!refracting() || isolated(T.surf)) { dropLift(T); return null; }
+    if (!refracting() || noRefract(T.surf)) { dropLift(T); return null; }
     if (Z && Z.el.parentNode === T.surf) { return Z; }
     dropLift(T);
     var el = doc.createElement('span'), ref = doc.createElement('span'), rim = doc.createElement('span');
@@ -1502,7 +1623,7 @@
     for (j = 0; j < list.length; j++) {
       var host = list[j], have = [], c = host.children;
       for (k = 0; k < c.length; k++) { if (c[k].className === 'lg-hdr') { have.push(c[k]); } }
-      if (!on) { for (k = 0; k < have.length; k++) { host.removeChild(have[k]); } continue; }
+      if (!on || host.closest('[data-lg-solid]')) { for (k = 0; k < have.length; k++) { host.removeChild(have[k]); } continue; }
       if (have.length) { continue; }
       var spots = hdrSpots(host);
       for (k = 0; k < spots.length; k++) {
@@ -1806,6 +1927,32 @@
     setTimeout(function () { if (el.parentNode) { el.parentNode.removeChild(el); } }, 4000);
   }
 
+  /**
+   * 换品牌色：把 palette() 推出来的那段 CSS 放进一个自己插的 <style data-lg-accent>（插在 <head> 末尾）。
+   * null / '' 撤掉，回到样式表里的那一套。认不出的颜色什么都不改，返回 null。
+   * 页面开了内容安全策略（style-src 不许内联）时，给 LiquidGlassConfig.nonce；或者干脆用 scripts/accent.mjs 预先生成一段 CSS
+   */
+  var accentNode = null, accentNow = '';
+  function setAccent(color) {
+    var clear = color == null || color === '', p = clear ? null : palette(color);
+    if (!clear && !p) { return null; }
+    if (!p) {
+      if (accentNode && accentNode.parentNode) { accentNode.parentNode.removeChild(accentNode); }
+      accentNode = null;
+    } else {
+      if (!accentNode) {
+        accentNode = doc.createElement('style');
+        accentNode.setAttribute('data-lg-accent', '');
+        if (CFG.nonce) { accentNode.setAttribute('nonce', CFG.nonce); }
+      }
+      accentNode.textContent = p.css;
+      if (!accentNode.parentNode) { (doc.head || root).appendChild(accentNode); }
+    }
+    var now = p ? p.color : '';
+    if (now !== accentNow) { accentNow = now; emit('lg:accentchange', { color: now || null }); }
+    return p;
+  }
+
   /* ══ 9 页面变了就对一遍：一帧最多一次 ═══════════════════════════════════ */
 
   var syncQueued = false;
@@ -1814,9 +1961,11 @@
     syncQueued = true;
     win.requestAnimationFrame(function () { syncQueued = false; sync(); });
   }
+  var solidChanged = false;
   function sync() {
     if (!doc.body) { return; }
     scanRefract();
+    if (solidChanged) { solidChanged = false; refreshAllRefract(); }
     if (mode !== 'off') { syncThumbs(); syncLenses(); }
     syncHdr();
   }
@@ -1826,10 +1975,14 @@
     if (started) { return; }
     started = true;
     if (typeof win.MutationObserver === 'function') {
-      new win.MutationObserver(scheduleSync).observe(doc.body, {
+      new win.MutationObserver(function (list) {
+        // 一片区域换成 / 换回实色：已经在折射的玻璃要重新判断一遍（scanRefract 只管新出现的）
+        for (var i = 0; i < list.length; i++) { if (list[i].attributeName === 'data-lg-solid') { solidChanged = true; } }
+        scheduleSync();
+      }).observe(doc.body, {
         subtree: true, childList: true, attributes: true,
         attributeFilter: ['aria-pressed', 'aria-selected', 'aria-checked', 'aria-current', 'aria-expanded',
-          'hidden', 'class', 'data-lg-on', 'data-collapsed']
+          'hidden', 'class', 'data-lg-on', 'data-collapsed', 'data-lg-solid']
       });
     }
     win.addEventListener('resize', scheduleSync);
@@ -1852,6 +2005,9 @@
     if (!root.hasAttribute('data-lg-tier')) { root.setAttribute('data-lg-tier', p0 === 'off' || p0 === 'lite' ? 'l0' : 'l1'); }
   }
 
+  // 配置里给了品牌色：同步插进去（脚本放在 <head> 里时赶在页面画出来之前，不会先闪一下默认的蓝）
+  if (CFG.accent) { setAccent(CFG.accent); }
+
   /** 撤掉所有折射（换配置时：新的预设可能不再给这些元素折射） */
   function forgetRefract() {
     for (var i = 0; i < refractNodes.length; i++) {
@@ -1870,6 +2026,7 @@
    */
   function init(options) {
     configure(assign(assign({}, CFG), options || {}));
+    if (options && Object.prototype.hasOwnProperty.call(options, 'accent')) { setAccent(options.accent); }
     try { slow = win.sessionStorage.getItem(SLOW_KEY) === '1'; } catch (e) { slow = false; }
     if (started) {
       teardown();
@@ -1884,7 +2041,7 @@
   }
 
   var api = win.LiquidGlass = {
-    version: '1.3.0',
+    version: '1.4.0',
     /** true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身 */
     supported: true,
     /** 换配置（同 window.LiquidGlassConfig 的选项），返回 LiquidGlass 本身 */
@@ -1899,7 +2056,13 @@
     refresh: scheduleSync,
     /** 这一档的说明文字 */
     describe: function () { return tierNote(pref(), tier); },
-    notify: notify
+    notify: notify,
+    /** 一个颜色 → 浅深两套主色令牌和一段 CSS（不碰页面）；认不出返回 null */
+    palette: palette,
+    /** 换品牌色（null 回到样式表里的那一套），返回 palette() 的结果 */
+    setAccent: setAccent,
+    /** 现在的品牌色（setAccent / 配置给的），没换过是 '' */
+    accent: function () { return accentNow; }
   };
 
   if (doc.body) { start(); } else { doc.addEventListener('DOMContentLoaded', start); }

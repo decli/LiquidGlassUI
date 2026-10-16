@@ -13,20 +13,30 @@
 |---|---|
 | ![玻璃导航条](design/tabbar-dark@2x.png) | ![折射](design/refraction@2x.png) |
 
+| 品牌色：给一个颜色（这里是紫），主按钮、选中项、进度条一起换；导出跑到一半，状态点在转、字在扫光 | 深色 + 亮黄：白字压不住，主按钮上自动换成深色字；「还在进行」只在跑着时动 |
+|---|---|
+| ![品牌色](design/accent@2x.png) | ![亮黄](design/accent-dark@2x.png) |
+
 ## 有什么
 
 - **会折射的玻璃**：照 iOS 26 的玻璃边——边上那一圈把背后的内容**放大**，带一点彩边（**色散**），正中一个像素都不动。`backdrop-filter` 里挂一条 SVG 滤镜：位移曲线 `0.45·b·(1 − s/b)²`（透镜 `0.345·b`）往里取样、处处不折叠，分两段走，贴图切成九宫格，尺寸变了只挪不重画。链里没有门控、模糊层、乳白——Mac 上 Chrome 的 Skia Graphite 会把它们画成透镜里一圈接缝。Chrome / Edge 上有，其他浏览器自动退成模糊。
 - **按住浮起的分段开关与玻璃导航条**：像 iOS 26 的标签栏，按住任一项，滑块浮起成一块盖在字上面、会折射的清玻璃透镜，飞到手指下面；能拖，拖过两端像橡皮筋，甩一下整条形变再回弹；点别的项时浮着滑过去。另有浮在内容上面的玻璃导航条（`.lg-seg--glass`，图标 + 字）。
 - **流动的透镜**：鼠标经过、键盘聚焦时，一颗清玻璃按弹簧物理流到那一项底下，经过的项微微放大、跟手，按下像果冻。
 - **液态滑块**：选中项底下那一块前沿先到、后沿后到，中途被拉长、落定回弹。
-- **统一的按钮反馈**：悬停浮起 1px + 投影加深 + 跟着指针走的指尖光，按下缩一点。
+- **统一的按钮反馈**：悬停浮起 1px + 投影加深 + 跟着指针走的指尖光；按下缩一点、投影收回（落回页面上）；打开着菜单的胶囊 / 按钮一直亮着、小箭头朝上。
+- **一个颜色换整套品牌色**：`LiquidGlass.setAccent('#7c3aed')`、配置里写 `accent`，或 `node liquid-glass-ui/scripts/accent.mjs '#7c3aed'` 生成一段 CSS。
+  在 OKLCH 里保留色相、照默认那套蓝推出浅深两套主色（默认的蓝推出来就是样式表里那一套）；字在卡片上 ≥ 4.5:1，亮黄这类按钮上自动换深色字。
+- **进度与「还在进行」**：进度条（还在走时一道光扫过、不知道要多久时一段来回走）、三个点、扫光字、在转的状态点。动只说「还没完」，完了停下、用颜色说结果；
+  系统要求减少动态效果时停下、但照样看得出来。
 - **iPadOS「设置」式的分组侧栏**：每组菜单项垫一块圆角底板，一眼看出一项属于哪一组；可折叠成图标轨。
 - **三档开关与自动降级**：完整 / 精简 / 关闭，三档肉眼分得出来；远程桌面、虚拟机（软件渲染）、掉帧时自动先不折射；
-  跟随系统的「减少动态效果」「减少透明度」「增强对比度」。
+  跟随系统的「减少动态效果」「减少透明度」「增强对比度」。一片区域写 `data-lg-solid` 就单独换成实色（不透、不折射，边上的光和投影照旧）。
 - **HDR 高光**：HDR 屏上玻璃上沿一道比页面白更亮的光（16 位 PNG + cICP）。
-- **浅色 / 深色 / 跟随系统**，玻璃提示、浮动提示、命令面板、弹出菜单、表格、表单一整套组件。
-- **完整的方法**：设计规范、技术原理、43 个踩坑、每轮评审的设计决策、静态检查与截图校验脚本。
-  第二版（1.1.0）对照 [ZeppBridge](https://github.com/lingcang728/ZeppBridge/tree/v3) 照 iOS 26 逐帧重做的玻璃改了折射模型、加上了按住浮起，经过见 `references/design-decisions.md` 第八轮。
+- **浅色 / 深色 / 跟随系统**，玻璃提示、浮动提示、命令面板、弹出菜单、表格、表单一整套组件；`color-scheme` 跟着主题，滚动条、下拉列表、
+  自动填充过的输入框在深色里也是深的；输入框、分段开关的槽是真的「压进去」的（上唇阴影、下唇亮线）。
+- **完整的方法**：设计规范、技术原理、48 个踩坑、每轮评审的设计决策、静态检查与截图校验脚本。
+  第二版（1.1.0）对照 [ZeppBridge](https://github.com/lingcang728/ZeppBridge/tree/v3) 照 iOS 26 逐帧重做的玻璃改了折射模型、加上了按住浮起，经过见 `references/design-decisions.md` 第八轮；
+  1.4.0 对照 [Solid Glass](https://github.com/deeplethe/solid-glass)（一套「实心玻璃」主题）补了材质细节与品牌色，借了什么、没借什么见第十七轮。
 
 ## 在网页项目里用
 
@@ -49,7 +59,7 @@
 **npm / 打包工具**（Vite、webpack、Next.js、Nuxt……；服务端渲染时 import 也不会报错）：
 
 ```bash
-npm i github:decli/LiquidGlassUI#v1.3.0
+npm i github:decli/LiquidGlassUI#v1.4.0
 ```
 
 ```js
@@ -61,7 +71,13 @@ LiquidGlass.init({ storageKey: 'myapp.glass' });   // 可选：改配置
 **浏览器原生 ES 模块**：`import LiquidGlass from '/static/liquid-glass.mjs'`（`liquid-glass.js` 放在同一目录）。
 
 然后照 `liquid-glass-ui/assets/demo/index.html` 的结构给元素套上组件类。带 TypeScript 类型；`LiquidGlass` 的接口只有
-`init / mode / tier / setMode / refresh / describe / notify` 几个，全都可选。
+`init / mode / tier / setMode / refresh / describe / notify / palette / setAccent / accent` 几个，全都可选。
+
+换品牌色（浅深两套主色由一个颜色推出来，详见[接入指南 §8](liquid-glass-ui/references/integration.md)）：
+
+```bash
+node liquid-glass-ui/scripts/accent.mjs '#0a7d5a' > brand.css   # 放在 liquid-glass.css 后面引入；或者页面里 LiquidGlass.setAccent('#0a7d5a')
+```
 
 看演示：
 
@@ -112,6 +128,7 @@ liquid-glass-ui/                 ← skill 本体（整个文件夹拷走即可�
 └── scripts/
     ├── check.mjs                静态检查（只要 Node）
     ├── shoot.mjs                真浏览器截图 + 三档 / 折射 / 分段开关校验（要 Playwright）
+    ├── accent.mjs               一个颜色 → 浅深两套主色令牌的 CSS（换品牌色）
     ├── displacement_map.py      位移贴图 / 静态 SVG 滤镜生成器
     └── hdr_png.py               HDR 高光贴片生成器
 design/                          定稿截图（由 scripts/shoot.mjs 拍的）
@@ -132,10 +149,12 @@ tools/package_skill.py           把 liquid-glass-ui/ 打成 .skill（与官方 
 ## 改完怎么验
 
 ```bash
-node liquid-glass-ui/scripts/check.mjs         # ES5、不改 class、令牌一致、类名没拼错、版本号各处一致、服务端渲染时 import 不报错
+node liquid-glass-ui/scripts/check.mjs         # ES5、不改 class、令牌一致、类名没拼错、版本号各处一致、服务端渲染时 import 不报错、
+                                               # 品牌色推导（默认蓝复现样式表、一圈色相字都压得住）
 node liquid-glass-ui/scripts/shoot.mjs         # 拍演示页整套截图，并验：三档分得开、每个能点的元素悬停都有反馈、所有玻璃同一种材质、
                                                # 玻璃正中逐像素不动而外圈在弯、分段开关与玻璃导航条按住 / 拖 / 甩 / 橡皮筋都对、
-                                               # 真滚动条 + 2 倍屏下点表格每一行滚动条都不闪、几种引入方式都能用（需要 Playwright）
+                                               # 真滚动条 + 2 倍屏下点表格每一行滚动条都不闪、几种引入方式都能用、
+                                               # 换品牌色 / 展开态 / 按下落回 / 局部实色 / 「还在进行」都对（需要 Playwright）
 python3 liquid-glass-ui/scripts/displacement_map.py --selftest   # 位移曲线不折叠、九宫格拼回去和整张一样
 python3 liquid-glass-ui/scripts/hdr_png.py --verify liquid-glass-ui/assets/liquid-glass.js
 ```
@@ -171,6 +190,10 @@ no blur layer, veil or gate in the chain, so Chrome's Skia Graphite backend on m
 fluid spring-driven hover lenses, liquid selection sliders, a tab-bar-style segmented control whose thumb lifts into a
 refracting lens you can drag (rubber-band ends, flick deformation), pointer-following glow, glass tooltips, HDR highlights,
 an iPadOS-style grouped sidebar, and a
-Full / Lite / Off switch with automatic fallback on software-rendered GPUs. It is also a Claude skill: copy
+Full / Lite / Off switch with automatic fallback on software-rendered GPUs. Since 1.4 (after a comparison with
+[Solid Glass](https://github.com/deeplethe/solid-glass)) one brand colour drives the whole accent palette for both themes
+(`LiquidGlass.setAccent('#7c3aed')` or `scripts/accent.mjs`, derived in OKLCH with guaranteed text contrast), and the kit adds
+progress / busy indicators that move only while something is running, `data-lg-solid` for opaque regions, lit grooves, pressed
+states that sit down, held-open triggers and theme-aware `color-scheme`. It is also a Claude skill: copy
 `liquid-glass-ui/` into `~/.claude/skills/` and ask Claude to restyle a UI in Liquid Glass. Docs are in Chinese;
 the script's built-in messages switch to English when `<html lang>` is not Chinese. MIT licensed.

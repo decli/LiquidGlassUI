@@ -12,7 +12,8 @@
  *   · 「深色（显式）」与「深色（跟随系统）」两块令牌逐字一致；深色里的令牌浅色里都有
  *   · 脚本插入的元素、预设里的组件类，样式表里都有；样式表认的状态属性，脚本都会写
  *   · 页面里用到的 lg-* 类都在样式表里（拼错一个字母就是一块不起作用的样式）
- *   · 查本套件自己时：脚本里折射的位移曲线常数（K）与 scripts/displacement_map.py 一致
+ *   · 查本套件自己时：脚本里折射的位移曲线常数（K）与 scripts/displacement_map.py 一致；
+ *     品牌色推导（LiquidGlass.palette）在默认的蓝上复现样式表里的令牌、换任何颜色字都压得住
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -130,7 +131,7 @@ check('脚本插入的元素、预设里的组件类，样式表里都有',
   [...new Set([...jsClasses, ...presetClasses])].filter(c => c !== 'lg-defs' && !classesInCss.has(c)).map(c => `.${c} 在样式表里没有`));
 
 const stateAttrs = [...new Set([...plain.matchAll(/\[(data-(?:lg-[\w-]+|settled|onsel|danger|side|up))/g)].map(m => m[1]))];
-const writtenByPage = ['data-lg-mode-switch', 'data-lg-tip', 'data-lg-lens', 'data-lg-refract', 'data-lg-slider', 'data-lg-hdr'];
+const writtenByPage = ['data-lg-mode-switch', 'data-lg-tip', 'data-lg-lens', 'data-lg-refract', 'data-lg-slider', 'data-lg-hdr', 'data-lg-solid'];
 check('样式表认的状态属性，脚本都会写', stateAttrs
   .filter(a => !js.includes(`'${a}'`) && !writtenByPage.includes(a) && !(a === 'data-lg-lens' && js.includes("'data-lg-lens'")))
   .map(a => `${a}：样式表里用了，脚本里没写`));
@@ -185,6 +186,64 @@ if (!argv.length) {
     if (M !== L) { bad.push('import liquid-glass.mjs 拿到的和 require 的不是同一个'); }
   } catch (e) { bad.push('报错：' + String(e).slice(0, 160)); }
   check('服务端渲染时 require / import 不报错，拿到替身', bad);
+}
+
+// 品牌色推导（LiquidGlass.palette，页面里的 setAccent 和 scripts/accent.mjs 用的都是它）：
+//   · 默认的蓝推出来的就是样式表里那一套（OKLab 距离 ≤ 0.03，透明度一样）——数是照它量的，量偏了这里先报；
+//   · 一圈色相加上黑、白、灰、亮黄：字在卡片上 ≥ 4.5:1，按钮上的字白字 ≥ 默认蓝的水平（浅 4.2、深 3.5）、深色字 ≥ 4.5，
+//     颜色都在 sRGB 里；生成的 CSS 里两块深色一样；认不出的颜色返回 null
+if (!argv.length) {
+  const bad = [];
+  try {
+    const { createRequire } = await import('node:module');
+    const L = createRequire(import.meta.url)(resolve(assets, 'liquid-glass.js'));
+    const lin = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const parse = v => {
+      const h = /^#([0-9a-f]{6})$/i.exec(v);
+      if (h) { return [0, 2, 4].map(i => parseInt(h[1].slice(i, i + 2), 16)).concat(1); }
+      const m = /^rgba\((\d+), (\d+), (\d+), (\.\d+|1|0)\)$/.exec(v);
+      return m ? [+m[1], +m[2], +m[3], +m[4]] : null;
+    };
+    const lab = c => {
+      const [r, g, b] = c.slice(0, 3).map(lin);
+      const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b),
+        s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+      return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+    };
+    const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+    const cr = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    const Lt = decls(light), Dt = decls(dark);
+    const base = L.palette(Lt.get('--lg-accent'));
+    for (const [name, got, want] of [['浅色', base && base.light, Lt], ['深色', base && base.dark, Dt]]) {
+      if (!got) { bad.push('palette() 认不出样式表里的 --lg-accent'); break; }
+      for (const k of Object.keys(got)) {
+        const a = parse(got[k]), b = parse(want.get(k) || '');
+        if (!a || !b) { bad.push(`${name} ${k}：推出来是「${got[k]}」，样式表里是「${want.get(k)}」，没法比`); continue; }
+        const d = Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]));
+        if (d > 0.03 || a[3] !== b[3]) { bad.push(`${name} ${k}：推出来是 ${got[k]}，样式表里是 ${want.get(k)}（OKLab 距离 ${d.toFixed(3)}）`); }
+      }
+    }
+    const surf = { light: parse(Lt.get('--lg-surface')), dark: parse(Dt.get('--lg-surface')) };
+    const colors = ['#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e', '#16a34a', '#10b981', '#14b8a6', '#06b6d4',
+      '#0ea5e9', '#3b82f6', '#6366f1', '#7c3aed', '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#000000', '#ffffff', '#6b7280',
+      '#ffd400', '#1e2a5a', '#ff0000', '#00ff00', '#0000ff', '#0a7d5a', 'rgb(124, 58, 237)', '#73e'];
+    for (const c of colors) {
+      const p = L.palette(c);
+      if (!p) { bad.push(`${c}：palette() 返回 null`); continue; }
+      for (const th of ['light', 'dark']) {
+        const t = p[th], vals = Object.values(t).map(parse);
+        if (vals.some(v => !v || v.slice(0, 3).some(x => x < 0 || x > 255 || x !== Math.round(x)))) { bad.push(`${c} ${th}：有写不成 #rrggbb / rgba() 的值`); }
+        const a = parse(t['--lg-accent']), on = parse(t['--lg-on-accent']), mid = parse(t['--lg-pro-glow']);
+        if (cr(a, surf[th]) < 4.5) { bad.push(`${c} ${th}：字 ${t['--lg-accent']} 在卡片上只有 ${cr(a, surf[th]).toFixed(2)}:1`); }
+        const white = on.slice(0, 3).every(v => v === 255), need = white ? (th === 'dark' ? 3.5 : 4.2) : 4.5;
+        if (cr(on, mid) < need - 0.01) { bad.push(`${c} ${th}：按钮上的字 ${t['--lg-on-accent']} 只有 ${cr(on, mid).toFixed(2)}:1（要 ${need}）`); }
+      }
+      const blocks = [...p.css.matchAll(/\{([^{}]*)\}/g)].map(m => m[1].replace(/\s+/g, ' ').trim());
+      if (blocks.length !== 3 || blocks[1] !== blocks[2]) { bad.push(`${c}：生成的 CSS 不是三块，或两块深色不一样`); }
+    }
+    for (const c of ['', 'blue', '#12', 'rgb(1,2)', null, undefined, '#ggg']) { if (L.palette(c) !== null) { bad.push(`${JSON.stringify(c)} 应该认不出（返回 null）`); } }
+  } catch (e) { bad.push('报错：' + String(e.stack || e).slice(0, 300)); }
+  check('品牌色推导：默认蓝复现样式表、各色相对比度达标、都在色域内（LiquidGlass.palette）', bad);
 }
 
 console.log(`\n${pass} 项通过，${fails.length} 项失败`);

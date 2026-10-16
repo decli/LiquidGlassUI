@@ -15,7 +15,8 @@
 8. 液态滑块
 9. 分档与自动降级
 10. 背景根（Backdrop Root）：玻璃为什么会突然「采不到背景」
-11. 参考资料
+11. 品牌色：一个颜色推出整套主色
+12. 参考资料
 
 ---
 
@@ -456,7 +457,48 @@ W3C Filter Effects Level 2 规定：一个元素的祖先如果带 `filter`、`o
 - 挂了 `url()` 位移滤镜的玻璃隔着背景根时不只是采不到背景，还会画成一块发暗的方块（§4.10）——脚本检测到就不开折射。
   这也是为什么面板的毛玻璃画在 `::before` 上而不是宿主上：宿主自己带 `backdrop-filter` 的话，它里面的透镜就隔着背景根了。
 
-## 11. 参考资料
+## 11. 品牌色：一个颜色推出整套主色
+
+主色不是一个令牌，是浅深两套各 8–9 个：字的颜色（`--lg-accent`）、它的悬停色、焦点光圈、选中项的浅玻璃、主按钮渐变的上下两色、
+按钮的光晕、白按钮指尖光的颜色，以及按钮上的字（`--lg-on-accent`）。以前换品牌色要手改这十几个值，还要自己算白字压不压得住；
+1.4 起给一个颜色就够了：`LiquidGlass.palette(颜色)` 推出两套令牌和一段 CSS，`setAccent()` 在页面里直接换，
+`scripts/accent.mjs` 在 Node 里生成同一段 CSS。三者是同一份代码（`liquid-glass.js` §0），纯函数，服务端渲染时也能算。
+
+**在 OKLCH 里推。** OKLCH 是 OKLab（Björn Ottosson，2020）的极坐标：明度 L、彩度 C、色相 H。它的明度和人眼感觉的亮暗基本一致，
+同样「亮 0.05」在蓝和黄上看着差不多，所以「比品牌色亮一点 / 暗一点」可以对所有色相用同一个数。HSL 做不到：
+HSL 里亮度 50% 的黄和蓝，人看着差得很远。
+
+**数从默认的蓝量出来。** 把样式表里那套蓝（`#2f6fe0`）的每个令牌换算成 OKLCH，记下它们和 `#2f6fe0` 的明度差、彩度比：
+
+| 令牌 | 浅色 | 深色 |
+|---|---|---|
+| 字（`--lg-accent`） | 品牌色本身 | 明度 + 0.09，彩度 × 0.91 |
+| 字的悬停色 | 明度 − 0.103，彩度 × 0.92 | 明度 + 0.08，彩度 × 0.75 |
+| 主按钮渐变正中 | 明度 + 0.023，彩度 × 0.98 | 明度 + 0.067，彩度 × 0.933 |
+| 渐变上 / 下 | 正中 ± 0.046，彩度 × (1 ∓ 0.056) | 正中 ± 0.05，彩度 × (1 ∓ 0.074) |
+| 光圈、浅玻璃 | 字的颜色 24% / 11% | 字的颜色 32% / 17% |
+| 按钮光晕、白按钮指尖光 | 渐变正中 50% / 13% | 渐变正中 45%（深色的指尖光是白的，不跟品牌色） |
+
+换一个品牌色，保留它的色相，照这张表推。默认的蓝推出来就是样式表里那一套——`check.mjs` 逐个比（OKLab 距离 ≤ 0.03，透明度相同），
+量偏了它先报。渐变正中最亮 0.85：再亮，上沿就白成一片，看不出是这个颜色。
+
+**三条兜底**（全部按 WCAG 对比度算）：
+
+1. **字压得住。** 字的颜色在卡片底（浅 `#ffffff`、深 `#1a1f26`）上不到 4.5:1，就沿明度一步 0.005 往暗（浅色）/ 往亮（深色）走，
+   直到够为止。蓝、紫、玫红这类本来就够，原样；亮黄在浅色里会压成橄榄色——白底上要读得清，只能这样。
+2. **按钮上的字。** 白字在渐变正中的对比度够得上默认那套蓝的水平（浅 4.2:1、深 3.5:1——样式表里的蓝就是这个数）就用白字。
+   不够时看差多少：把按钮压暗不超过 0.08 就够的（红、粉、青绿这类），压暗一点、照样白字；差得多的（亮黄、亮绿、橙、天蓝这类），
+   保留按钮原来的亮度、换成同色相的深色字（明度 0.22，≥ 4.5:1）；两样都不行才一直压暗到白字够。
+   选中的菜单项、品牌色块上的字都跟着 `--lg-on-accent` 走（pitfalls.md #48）；危险项是红底，永远白字。
+3. **屏幕显示得出来。** 推出来的颜色超出 sRGB 时，固定明度和色相、二分着减彩度，直到显示得出来。直接把 RGB 截到 0–255 会偏色
+   （超出的那一路被截掉，色相就转了）。
+
+**怎么放进页面。** 生成的 CSS 是三块：`html:root`、`html:root[data-theme="dark"]`、跟随系统的深色——和样式表里的令牌一一对应。
+选择器多写一个 `html`，比样式表里的 `:root` 具体，所以贴在哪儿都盖得住，不依赖引入顺序。`setAccent()` 把这段 CSS 放进一个自己插的
+`<style data-lg-accent>`（放在 `<head>` 末尾）；`setAccent(null)` 撤掉它，回到样式表里的那一套。页面开了内容安全策略、不许内联样式时，
+给 `LiquidGlassConfig.nonce`，或者干脆用 `accent.mjs` 预先生成一段 CSS 放进自己的样式表——那样连「脚本加载前先闪一下蓝」都没有。
+
+## 12. 参考资料
 
 - Apple Human Interface Guidelines：Materials、Sidebars；Technology Overviews：Adopting Liquid Glass；
   SwiftUI 文档：`glassEffect`、`GlassEffectContainer`、`Spring(duration:bounce:)`。
@@ -468,6 +510,12 @@ W3C Filter Effects Level 2 规定：一个元素的祖先如果带 `filter`、`o
   背景根下透镜变成暗块的实测，都来自它的 `src/lib/glassLens.ts`、`src/lib/segmentGlass.ts`、`src/components/SegmentTrack.vue`、
   `scripts/assets/build-glass-lens-maps.py` 与提交说明；这里用 ES5 重写，并把端帽 + 中段推广成任意圆角的九宫格。
 - Inigo Quilez：*2D distance functions*（圆角矩形的有符号距离公式）。
+- Björn Ottosson：*A perceptual color space for image processing*（OKLab，2020）。§11 的品牌色推导在它的极坐标 OKLCH 里做。
+- Solid Glass（deeplethe/solid-glass，MIT）：一套给 shadcn/ui 用的「实心玻璃」主题——站在扁平和液态玻璃之间，面板几乎不透，
+  玻璃感只在边上（上沿一道光、一圈细线、一道贴地的影子）。1.4 从它借了：凹槽「上唇阴影、下唇亮线」的受光、按下时投影收回（落回页面）、
+  打开着菜单的触发器和悬停同一种亮（它的「One state」）、局部换实色（它的 `data-glass="opaque"`）、`color-scheme` 跟主题、
+  自动填充的「慢慢变」、「动 = 还在进行，颜色 = 结果」的动效纪律，以及它 Create 页面的思路——每个色相单独定明度保证白字 4.5:1、
+  只输出改过的那几个变量。没借的、为什么，见 `design-decisions.md` 第十七轮。
 - W3C Filter Effects Module Level 2：`backdrop-filter` 与 Backdrop Root。
 - W3C PNG Specification (Third Edition)：`cICP` 块；W3C Color on the Web 社区组：HDR in PNG requirements。
 - W3C Media Queries Level 5：`dynamic-range`、`prefers-reduced-transparency`、`prefers-contrast`、`prefers-reduced-motion`。

@@ -57,7 +57,7 @@
 ### B. npm / 打包工具（Vite、webpack、Next.js、Nuxt……）
 
 ```bash
-npm i github:decli/LiquidGlassUI#v1.3.0     # 装某个发布版；仓库是私有的，本机的 git 要能 clone 它
+npm i github:decli/LiquidGlassUI#v1.4.0     # 装某个发布版；仓库是私有的，本机的 git 要能 clone 它
 ```
 
 ```js
@@ -101,7 +101,8 @@ LiquidGlass.init({ storageKey: 'myapp.glass' });   // 可选：要改配置才�
 | `.lg-glass--menu` / `--bar` | 更实的弹出层玻璃 / 工具条玻璃 | 修饰 `.lg-glass` |
 | `.lg-card` | 实心厚玻璃（卡片） | 不带 `.lg-glass` |
 | `.lg-btn` / `--primary` / `--danger` / `--sm` | 次要白玻璃 / 主操作蓝 / 危险红 / 小号 | `<button>` 或 `<a>` |
-| `.lg-glass.lg-chip` | 页头上可按的玻璃胶囊 | 里面可放 `.lg-dot`、`.lg-chip-muted`、`.lg-chip-strong`、`.lg-chip-caret`、`.lg-chip-ico`、`.lg-kbd`；危险态加 `.lg-chip--danger` |
+| `.lg-glass.lg-chip` | 页头上可按的玻璃胶囊 | 里面可放 `.lg-dot`、`.lg-chip-muted`、`.lg-chip-strong`、`.lg-chip-caret`、`.lg-chip-ico`、`.lg-kbd`；危险态加 `.lg-chip--danger`；打开菜单的胶囊写 `aria-haspopup` + `aria-expanded`，开着时一直亮、小箭头朝上 |
+| `.lg-dot` / `--bad` / `--busy` | 状态点：绿 / 红 / 还在进行（灰点 + 一圈往外散的光） | 完了把 `--busy` 换成结果的颜色 |
 | `.lg-field` | 输入框 / 下拉 / 多行 | `input`、`select`、`textarea` 都行；标签用 `.lg-label` |
 | `.lg-seg` / `--sm` / `--block` | 分段开关（多选一） | 直接子元素是 `<button aria-pressed>` |
 | `.lg-glass.lg-seg.lg-seg--glass` | 玻璃导航条（iOS 26 的标签栏） | 直接子元素是 `<button aria-pressed>`，里面一个图标（`<svg>`）+ 一个 `<span>` 字；放在能滚的内容底部（`position: sticky; bottom: …` 或 `fixed`），见 7.3 |
@@ -122,6 +123,9 @@ LiquidGlass.init({ storageKey: 'myapp.glass' });   // 可选：要改配置才�
 | `.lg-note[data-kind=ok|info]` / `.lg-alert` | 灰色说明 / 红色报错 | 一句话，图标自动 |
 | `.lg-center` > `.lg-glass.lg-dialog` | 页面正中的玻璃卡片（登录框） | |
 | `.lg-fields` / `.lg-field--auto` | 一行筛选条件 + 按钮（底边对齐、放不下换行）/ 不占满整行的输入框 | `.lg-fields` 的子元素：`<div>`（标签 + 输入框）或按钮 |
+| `.lg-progress` > `span` | 进度条 | `role="progressbar"` + `aria-valuenow`，页面写 `span` 的 `style="width: 40%"`；还在走写 `aria-busy="true"`（一道光扫过去），完了 `false`；不写 `aria-valuenow` = 不知道要多久（一段来回走） |
+| `.lg-dots` > `span` × 3 | 三个轮流亮的点 | 颜色跟着字；读屏用旁边的字或 `role="status"` |
+| `.lg-shimmer` | 「正在……」上一道扫过的光 | 完了去掉这个类、换成一句陈述 |
 | `.lg-kbd`、`.lg-grow`、`.lg-hint`、`.lg-actions`、`.lg-form-grid`、`.lg-card-title` | 小工具类 | |
 
 ## 3. data 属性速查（自己的结构怎么接）
@@ -145,6 +149,7 @@ LiquidGlass.init({ storageKey: 'myapp.glass' });   // 可选：要改配置才�
 | `data-lg-mode-switch` | 开关那一组的容器 | 脚本在它的提示里写「现在实际是哪一档、为什么」 |
 | `data-lg-danger` | 选中项 | nav 滑块换成红色（`.lg-nav-item--danger` 同效） |
 | `data-lg-on` | 项 | 当作「选中」（`aria-*` 都不合适时用） |
+| `data-lg-solid` | 一块 `.lg-glass` 或它的祖先 | 局部换实色：里面的玻璃不透、不模糊、不折射（脚本也不给它们算），高光环、轮廓、投影照旧。给背后有图、里面是大段要读的字的那块用 |
 
 透镜的项要压在透镜上面：写 `.lg-item` 类最省事；用自定义选择器时脚本会给项标上 `data-lg-item`，样式表据此处理。
 装透镜 / 滑块的容器如果是 `position: static`，脚本会给它补一个 `position: relative`。
@@ -157,6 +162,8 @@ LiquidGlass.init({ storageKey: 'myapp.glass' });   // 可选：要改配置才�
 |---|---|
 | 选中 | `aria-selected="true"` / `aria-pressed="true"` / `aria-checked="true"` / `aria-current="page"`，或 `.is-cursor` / `.is-active` / `data-lg-on`。页面原来用自己的类标选中（比如 `.on`、`.active`）：**推荐**在切换处顺手写上对应的 `aria-*`（读屏也需要它，组件类的选中样式也认它）；不想动页面脚本就在 `LiquidGlassConfig.on` 里写上这个类，透镜与滑块照样认得 |
 | 收起 / 展开 | `aria-expanded` + 底板的 `hidden` |
+| 菜单开着 | 触发它的胶囊 / 按钮上 `aria-haspopup` + `aria-expanded="true"`（胶囊和带 `aria-haspopup` 的按钮开着时保持悬停那种亮） |
+| 还在进行 / 进度 | `.lg-progress` 的 `aria-busy`、`aria-valuenow` 与 `span` 的宽度；状态点 `.lg-dot--busy` → `.lg-dot` / `.lg-dot--bad` |
 | 收起的组里有当前页 | 组标题上 `data-has-active` |
 | 侧栏折叠 | `.lg-sidebar[data-collapsed="true"]` |
 | 主题 | `<html data-theme="light|dark|auto">`（写在 `<html>` 上，不要写在 `<body>`） |
@@ -180,7 +187,9 @@ window.LiquidGlassConfig = {
   refract: [ /* { sel, bezel, depth, disp, lens, power }：边宽、最外缘位移（缺省 0.45 × 边宽；lens 时 0.345 × 边宽）、色散（缺省 0.08）、lens: true 边宽到中线的透镜、剖面指数（缺省 2；3 是三次剖面） */ ],
   hdr: [ /* { sel, spots: 'top bottom' } */ ],
   tips: '.my-toolbar [title]', // 哪些 title 换成玻璃提示（整串替换）
-  glow: '.lg-btn, .my-button'  // 哪些元素写指尖光的 --mx / --my（整串替换）
+  glow: '.lg-btn, .my-button', // 哪些元素写指尖光的 --mx / --my（整串替换）
+  accent: '#0a7d5a',           // 品牌色：浅深两套主色由它推出来（第 8 节）；脚本在 <head> 里时赶在画出来之前换好
+  nonce: 'xyz'                 // 内容安全策略的 nonce：换品牌色插的 <style> 带上它
 };
 </script>
 ```
@@ -188,7 +197,7 @@ window.LiquidGlassConfig = {
 ## 6. 脚本接口与事件
 
 ```js
-LiquidGlass.version      // '1.3.0'
+LiquidGlass.version      // '1.4.0'
 LiquidGlass.supported    // true：真的在跑；false：服务端渲染、太老的浏览器拿到的替身（方法都在，什么都不做）
 LiquidGlass.init({ … })  // 换配置（第 5 节），返回 LiquidGlass 本身
 LiquidGlass.mode()       // 用户选的档：'auto' | 'full' | 'lite' | 'off'
@@ -197,14 +206,21 @@ LiquidGlass.setMode('lite', true)   // 换档（'auto' 回到自动）；第二�
 LiquidGlass.describe()   // 这一档的说明文字
 LiquidGlass.refresh()    // 页面结构大改后手动对一遍（平时不需要）
 LiquidGlass.notify('…')  // 弹一句玻璃浮动提示
+LiquidGlass.setAccent('#7c3aed')    // 换品牌色（浅深两套一起换）；null 回到样式表里的蓝；认不出的颜色返回 null、什么都不改
+LiquidGlass.accent()     // 现在的品牌色（'#7c3aed'），没换过是 ''
+LiquidGlass.palette('#7c3aed')      // 只算不换：{ color, light: {令牌}, dark: {令牌}, css }；服务端渲染时也能用
 
 document.addEventListener('lg:modechange', function (e) {
   console.log(e.detail.mode, e.detail.tier);   // 档位或材质档变了
 });
+document.addEventListener('lg:accentchange', function (e) {
+  console.log(e.detail.color);                 // 品牌色变了（null = 回到样式表里的那一套）
+});
 ```
 
 服务端渲染（没有 `window`）和不支持 CSS 变量或 `Element.closest` 的浏览器（IE11）上，`LiquidGlass` 是一个替身：
-方法都在、调了什么都不做，`supported` 为 `false`。调用方不用先判断能不能用。
+方法都在、调了什么都不做，`supported` 为 `false`。调用方不用先判断能不能用。`palette()` 是纯计算，替身上照样算得出来
+（服务端按租户的品牌色生成 CSS 塞进页面就用它）。
 
 ## 7. 常见做法
 
@@ -337,18 +353,24 @@ document.addEventListener('lg:modechange', function (e) {
 
 ## 8. 主题与品牌色
 
-- 主题写在 `<html data-theme>`：`light`、`dark`、`auto`（或不写）= 跟随系统。
-- 换品牌色：在自己的样式表里覆盖（浅深两套都要）：
+- 主题写在 `<html data-theme>`：`light`、`dark`、`auto`（或不写）= 跟随系统。`color-scheme` 已经跟着主题走
+  （滚动条、下拉列表、日期选择、自动填充一起变深），不用再写。
+- **换品牌色：给一个颜色就够**，浅深两套主色（字、悬停、光圈、选中的浅玻璃、主按钮渐变与光晕、按钮上的字）由它推出来，
+  字在卡片上 ≥ 4.5:1，按钮上白字压不住就换深色字（原理见 principles.md §11）。三种用法，同一个算法：
 
-```css
-:root { --lg-accent: #0a7d5a; --lg-accent-hover: #075c42; --lg-ring: rgba(10,125,90,.24);
-        --lg-accent-glass: rgba(10,125,90,.11); --lg-pro-top: #1f9a73; --lg-pro-bot: #0a7d5a;
-        --lg-pro-glow: rgba(10,125,90,.5); --lg-sec-glow: rgba(10,125,90,.13); }
-:root[data-theme="dark"] { /* 深色一套，同样的键 */ }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]):not([data-theme="dark"]) { /* 同上 */ } }
+```bash
+node scripts/accent.mjs '#0a7d5a' > brand.css            # 1. 生成一段 CSS，放在 liquid-glass.css 后面引入（最稳：不依赖脚本、不闪）
+node scripts/accent.mjs '#0a7d5a' --report               #    顺便看对比度
 ```
 
-- 改了令牌之后跑 `node scripts/check.mjs 你的.css 你的.js`：它会核对两块深色令牌是否一致。
+```html
+<script>window.LiquidGlassConfig = { accent: '#0a7d5a' };</script>   <!-- 2. 配置里写；脚本在 <head> 里时赶在画出来之前换好 -->
+<script>LiquidGlass.setAccent(user.brandColor);</script>            <!-- 3. 运行时换（多租户、让用户自己挑颜色）；null 换回默认 -->
+```
+
+  生成的选择器是 `html:root`（比样式表的 `:root` 具体），放在哪儿都盖得住。要手改个别令牌，在它后面再覆盖一次即可。
+  不要只改 `--lg-accent` 一个——选中项上的字、按钮光晕会对不上（pitfalls.md #48）。
+- 自己手改了令牌之后跑 `node scripts/check.mjs 你的.css 你的.js`：它会核对两块深色令牌是否一致。
 
 ## 9. 在 React / Vue / 其他框架里用
 
@@ -367,7 +389,8 @@ document.addEventListener('lg:modechange', function (e) {
 
 - **CSP**：`<head>` 的不闪脚本是内联的，需要 nonce / hash 或者挪进一个外部小文件；
   折射贴图（九宫格，每种圆角 × 边宽画一次）和 HDR 高光是 `data:` 图片，`img-src` 要允许 `data:`。
-  不许 `data:` 的话，用 `scripts/displacement_map.py --svg` 给尺寸固定的元素预先生成一段滤镜（贴图换成你托管的 PNG 文件也行）。脚本写样式用的是 CSSOM（`el.style.x = …`），不受 `style-src` 限制。
+  不许 `data:` 的话，用 `scripts/displacement_map.py --svg` 给尺寸固定的元素预先生成一段滤镜（贴图换成你托管的 PNG 文件也行）。脚本写样式用的是 CSSOM（`el.style.x = …`），不受 `style-src` 限制；
+  只有换品牌色（`setAccent` / 配置里的 `accent`）插一个 `<style>`——`style-src` 不许内联时给 `LiquidGlassConfig.nonce`，或者改用 `scripts/accent.mjs` 生成的静态 CSS。
 - **离线内网**：全部是本地文件，不走 CDN、不加载网络字体，断网照样工作。
 - **老浏览器**：不支持 CSS 变量或 `closest` 的（IE11）脚本直接不做事；样式表里 `@media screen\0` 一段给出实色兜底；
   三档开关自动隐藏。脚本只用 ES5，老一点的浏览器也不会因为语法报错而整个不执行。
@@ -382,5 +405,7 @@ document.addEventListener('lg:modechange', function (e) {
 4. 交互：菜单上下快速划过（透镜不闪、字不被划）、从第一项点到最后一项（滑块流过去、不拖成长条）、
    分段开关按住（浮起成透镜）、拖过去松手（换了选中、不会跳回原处）、拖过两端（像橡皮筋、松手弹回）、
    打开弹出菜单与命令面板（弹出不跳亮）、方向键走命令面板（光标跟着走）、折叠侧栏（滑块直接到位、图标上有玻璃提示）。
-5. 系统设置里打开「减少动态效果」「减少透明度」「增强对比度」各看一次。
+5. 系统设置里打开「减少动态效果」「减少透明度」「增强对比度」各看一次（减少动态效果时「还在进行」要停下、但照样看得出来）。
 6. 无头浏览器截图前先把档位设成 `full`：无头 Chromium 是软件渲染，自动档会先不折射。
+7. 换了品牌色：`node scripts/accent.mjs '#品牌色' --report` 看一眼对比度；浅深两套下主按钮、选中的菜单项、进度条都看一遍。
+8. 深色主题下看一眼滚动条、下拉列表、自动填充过的输入框——都应该是深色的。

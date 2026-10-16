@@ -66,8 +66,15 @@
   .demo-bar { display: block; height: 6px; border-radius: 3px; background: var(--lg-well); overflow: hidden; }
   .demo-bar > i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--lg-pro-top), var(--lg-accent)); }
   .lg-glass.demo-tabbar { position: sticky; bottom: 10px; z-index: 2; margin: 12px 0 10px; box-shadow: var(--lg-edge), var(--lg-shadow); }
+  /* 品牌色的色块；进度那一行 */
+  .demo-swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; vertical-align: -1px; box-shadow: 0 0 0 .5px rgba(15, 23, 42, .25); }
+  .demo-task { display: flex; align-items: center; font-size: 13px; }
+  .demo-task > .lg-dots { margin-left: 6px; }
+  .demo-task > .lg-count { margin-left: auto; }
+  .demo-task + .lg-progress { margin-top: 8px; }
+  .lg-progress + .demo-task { margin-top: 14px; }
   .demo-login-logo {
-    width: 48px; height: 48px; border-radius: 15px; margin-bottom: 16px; color: #fff; font-size: 22px; font-weight: 750;
+    width: 48px; height: 48px; border-radius: 15px; margin-bottom: 16px; color: var(--lg-on-accent); font-size: 22px; font-weight: 750;
     display: flex; align-items: center; justify-content: center;
     background: linear-gradient(180deg, var(--lg-pro-top), var(--lg-pro-bot));
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -1px 0 rgba(0, 0, 0, .14), 0 8px 18px -8px var(--lg-pro-glow);
@@ -263,9 +270,42 @@
             <p class="lg-hint">把玻璃拖到字上。Chrome / Edge 的「完整」档下，这一小块玻璃整块是一个透镜（<code>data-lg-refract="lens"</code>）：
               从中线往边上越弯越厉害，边上把背后的字和条纹放大、弯折（还带一点彩边），中线附近几乎不动；其他浏览器只模糊。
               大块面板用默认的写法：只有边上那一圈在弯、正中原样。花纹只放在这一小块里——整页铺底纹是噪声。</p>
+            <div class="demo-row demo-section">
+              <div class="lg-seg lg-seg--sm" role="group" aria-label="这块玻璃" id="lab-solid">
+                <button type="button" aria-pressed="true" data-solid="">透光</button>
+                <button type="button" aria-pressed="false" data-solid="1">实色</button>
+              </div>
+              <span class="demo-sub">实色：给这块写上 <code>data-lg-solid</code>——不透、不折射，高光环和投影照旧</span>
+            </div>
             <div class="demo-lab" id="lab">
               <div class="demo-lab-text">Liquid Glass 把光往中间收<br>边缘像一块有厚度的凸透镜</div>
               <div class="lg-glass demo-drop" id="drop" data-lg-refract="lens" role="img" aria-label="一块可以拖动的玻璃"></div>
+            </div>
+          </section>
+
+          <section class="lg-card">
+            <h2 class="lg-card-title">品牌色与「还在进行」</h2>
+            <p class="lg-hint">换一个品牌色：浅深两套主色由这一个颜色推出来（<code>LiquidGlass.setAccent('#7c3aed')</code>，
+              或者 <code>scripts/accent.mjs</code> 生成一段 CSS）。字压不住就压暗，亮黄这类按钮上换成深色字。</p>
+            <div class="demo-row demo-section">
+              <div class="lg-seg lg-seg--sm" role="group" aria-label="品牌色" id="accent">
+                <button type="button" aria-pressed="true" data-accent=""><i class="demo-swatch" style="background: #2f6fe0"></i>蓝</button>
+                <button type="button" aria-pressed="false" data-accent="#7c3aed"><i class="demo-swatch" style="background: #7c3aed"></i>紫</button>
+                <button type="button" aria-pressed="false" data-accent="#0a7d5a"><i class="demo-swatch" style="background: #0a7d5a"></i>墨绿</button>
+                <button type="button" aria-pressed="false" data-accent="#e8590c"><i class="demo-swatch" style="background: #e8590c"></i>橙</button>
+                <button type="button" aria-pressed="false" data-accent="#f5c400"><i class="demo-swatch" style="background: #f5c400"></i>亮黄</button>
+                <button type="button" aria-pressed="false" data-accent="#e11d48"><i class="demo-swatch" style="background: #e11d48"></i>玫红</button>
+              </div>
+            </div>
+            <p class="lg-hint demo-section">动 = 还没完，停下来用颜色说结果。点「再跑一次」：先连接（不知道要多久，一段来回走），再导出（进度条上一道光扫过），完了点变绿、全停。</p>
+            <div class="demo-task demo-section" id="task">
+              <span class="lg-dot" id="task-dot" aria-hidden="true"></span>
+              <span id="task-text">报表已导出</span><span class="lg-dots" id="task-dots" aria-hidden="true" hidden><span></span><span></span><span></span></span>
+              <span class="lg-count" id="task-pct">100%</span>
+            </div>
+            <div class="lg-progress" id="task-bar" role="progressbar" aria-label="导出报表" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-busy="false"><span style="width: 100%"></span></div>
+            <div class="lg-actions">
+              <button type="button" class="lg-btn lg-btn--primary lg-btn--sm" id="task-run">再跑一次</button>
             </div>
           </section>
         </div>
@@ -395,9 +435,13 @@
 
 <!--
   可选的全局配置：必须写在 liquid-glass.js 之前。这里只示范两项——
-  存储键（同一个域名下有多个应用时分开记），以及沿用页面语言的提示文案。
+  存储键（同一个域名下有多个应用时分开记），以及品牌色（accent：一个颜色推出浅深两套主色）。
 -->
-<script>window.LiquidGlassConfig = { storageKey: 'lg.glass' };</script>
+<script>
+window.LiquidGlassConfig = { storageKey: 'lg.glass' };
+// 品牌色：演示页把上次选的记在本机（真项目里直接写 accent: '#品牌色'，或用 scripts/accent.mjs 生成一段 CSS）
+try { window.LiquidGlassConfig.accent = localStorage.getItem('lg.demo.accent') || null; } catch (e) {}
+</script>
 <script src="../liquid-glass.js"></script>
 <script>
 /* 演示页自己的交互（ES5）。注意它和 liquid-glass.js 的分工：这里只改 aria-* / hidden / data-* 与内容，
@@ -467,9 +511,51 @@
       on(b, 'click', function () {
         $$('button', seg).forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
         if (seg.id === 'filter') { renderRows(b.getAttribute('data-filter')); }
+        if (seg.id === 'accent') { setAccent(b.getAttribute('data-accent')); }
+        if (seg.id === 'lab-solid') {
+          if (b.getAttribute('data-solid')) { $('#drop').setAttribute('data-lg-solid', ''); } else { $('#drop').removeAttribute('data-lg-solid'); }
+        }
       });
     });
   });
+
+  /* 品牌色：一个颜色换整套主色（浅深两套），记在本机，刷新还在 */
+  function setAccent(c) {
+    if (window.LiquidGlass) { window.LiquidGlass.setAccent(c || null); }
+    store('lg.demo.accent', c || '');
+  }
+  function syncAccent() {
+    var now = window.LiquidGlass ? window.LiquidGlass.accent() : '';
+    $$('#accent > button').forEach(function (b) { b.setAttribute('aria-pressed', String((b.getAttribute('data-accent') || '') === now)); });
+  }
+  on(doc, 'lg:accentchange', syncAccent);
+  syncAccent();
+
+  /* 「还在进行」：先连接（不知道要多久），再导出（0 → 100%），完了点变绿、字不再扫光、进度条不再扫。
+     只在跑着的时候动：一直转着的东西放在会折射的保存条底下，每一帧都要重算玻璃（pitfalls.md #16） */
+  var timer = null;
+  function runTask() {
+    var v = 0, t = 0, bar = $('#task-bar'), fill = bar.firstElementChild;
+    clearInterval(timer);
+    $('#task-dot').className = 'lg-dot lg-dot--busy';
+    $('#task-text').className = 'lg-shimmer'; $('#task-text').textContent = '正在连接';
+    $('#task-dots').hidden = false; $('#task-pct').textContent = '';
+    bar.removeAttribute('aria-valuenow'); bar.setAttribute('aria-busy', 'true'); fill.style.width = '';
+    timer = setInterval(function () {
+      t += 120;
+      if (t < 1200) { return; }
+      if (t === 1200) { $('#task-text').textContent = '正在导出报表'; fill.style.width = '0%'; }
+      v = Math.min(100, v + 4);
+      bar.setAttribute('aria-valuenow', String(v)); fill.style.width = v + '%';
+      $('#task-pct').textContent = v + '%';
+      if (v === 100) {
+        clearInterval(timer);
+        $('#task-dot').className = 'lg-dot'; $('#task-text').className = ''; $('#task-text').textContent = '报表已导出';
+        $('#task-dots').hidden = true; bar.setAttribute('aria-busy', 'false');
+      }
+    }, 120);
+  }
+  on($('#task-run'), 'click', runTask);
 
   /* 表格：编的数据 */
   var DATA = [
